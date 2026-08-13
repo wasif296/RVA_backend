@@ -27,14 +27,23 @@ import {
 import { watchRouter } from './modules/watch/watch.routes.js';
 import { uploadsRouter } from './modules/uploads/uploads.routes.js';
 import {
+  createStorageAdapter,
+  setStorageAdapter,
+} from './modules/uploads/storage.adapter.js';
+import {
   badgesRouter,
   gradingRouter,
 } from './modules/grading/grading.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 
 export function createApp() {
+  setStorageAdapter(createStorageAdapter(env.STORAGE_DRIVER));
+
   const app = express();
 
+  // Vercel terminates TLS at one proxy hop. trust proxy 1 lets Express read
+  // X-Forwarded-For so rate limits key on the real client IP. Do not set
+  // `true` — express-rate-limit rejects a fully permissive trust proxy.
   app.set('trust proxy', 1);
   app.use(helmet());
   app.use(

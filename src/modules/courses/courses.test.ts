@@ -2,7 +2,7 @@ import argon2 from 'argon2';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
 import { Course } from '../../models/Course.js';
 import { Lesson } from '../../models/Lesson.js';
@@ -11,6 +11,11 @@ import { Quiz } from '../../models/Quiz.js';
 import { QuizAttempt } from '../../models/QuizAttempt.js';
 import { User } from '../../models/User.js';
 import { slugify } from '../../utils/slugify.js';
+import {
+  resetStorageAdapterForTests,
+  setStorageAdapter,
+  type StorageAdapter,
+} from '../uploads/storage.adapter.js';
 
 describe('Phase 7A courses', () => {
   let mongod: MongoMemoryServer;
@@ -289,6 +294,245 @@ describe('Phase 7A courses', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  describe('thumbnailPublicId storage cleanup', () => {
+    const deleteMock = vi.fn<(key: string) => Promise<void>>();
+    const adapter: StorageAdapter = {
+      save: vi.fn(async () => ({ key: 'rva/thumbnails/new' })),
+      delete: deleteMock,
+      getPublicUrl: (key) => `https://res.cloudinary.com/demo/${key}`,
+    };
+
+    beforeEach(() => {
+      deleteMock.mockReset();
+      deleteMock.mockResolvedValue(undefined);
+      setStorageAdapter(adapter);
+    });
+
+    afterEach(() => {
+      resetStorageAdapterForTests();
+    });
+
+    it('replacing a Cloudinary thumbnail deletes the previous asset exactly once', async () => {
+      const adminToken = await loginAs('super_admin', 'admin-thumb-replace@rva.test');
+      const admin = await User.findOne({ email: 'admin-thumb-replace@rva.test' });
+      const course = await Course.create({
+        title: 'Cloudinary Thumb',
+        slug: 'cloudinary-thumb',
+        description: 'Has a stored asset',
+        thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/old-id',
+        thumbnailPublicId: 'rva/thumbnails/old-id',
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'draft',
+        createdBy: admin!._id,
+      });
+
+      const res = await request(app)
+        .patch(`/api/courses/${course._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/new-id',
+          thumbnailPublicId: 'rva/thumbnails/new-id',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.course.thumbnailUrl).toBe(
+        'https://res.cloudinary.com/demo/rva/thumbnails/new-id',
+      );
+      expect(res.body.course.thumbnailPublicId).toBe('rva/thumbnails/new-id');
+      expect(deleteMock).toHaveBeenCalledTimes(1);
+      expect(deleteMock).toHaveBeenCalledWith('rva/thumbnails/old-id');
+
+      const stored = await Course.findById(course._id);
+      expect(stored?.thumbnailPublicId).toBe('rva/thumbnails/new-id');
+    });
+
+    it('replacing an external https thumbnail deletes nothing', async () => {
+      const adminToken = await loginAs('super_admin', 'admin-thumb-https@rva.test');
+      const admin = await User.findOne({ email: 'admin-thumb-https@rva.test' });
+      const course = await Course.create({
+        title: 'External Thumb',
+        slug: 'external-thumb',
+        description: 'No stored asset',
+        thumbnailUrl: 'https://cdn.example.com/old.jpg',
+        thumbnailPublicId: null,
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'draft',
+        createdBy: admin!._id,
+      });
+
+      const res = await request(app)
+        .patch(`/api/courses/${course._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          thumbnailUrl: 'https://cdn.example.com/new.jpg',
+          thumbnailPublicId: null,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.course.thumbnailUrl).toBe('https://cdn.example.com/new.jpg');
+      expect(res.body.course.thumbnailPublicId).toBeNull();
+      expect(deleteMock).not.toHaveBeenCalled();
+    });
+
+    it('a failing adapter delete does not fail or roll back the course update', async () => {
+      deleteMock.mockRejectedValue(new Error('Cloudinary timeout'));
+      const adminToken = await loginAs('super_admin', 'admin-thumb-fail@rva.test');
+      const admin = await User.findOne({ email: 'admin-thumb-fail@rva.test' });
+      const course = await Course.create({
+        title: 'Failing Delete',
+        slug: 'failing-delete',
+        description: 'Delete will time out',
+        thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/old-fail',
+        thumbnailPublicId: 'rva/thumbnails/old-fail',
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'draft',
+        createdBy: admin!._id,
+      });
+
+      const res = await request(app)
+        .patch(`/api/courses/${course._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/new-fail',
+          thumbnailPublicId: 'rva/thumbnails/new-fail',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.course.thumbnailPublicId).toBe('rva/thumbnails/new-fail');
+      expect(deleteMock).toHaveBeenCalledTimes(1);
+
+      const stored = await Course.findById(course._id);
+      expect(stored?.thumbnailUrl).toBe(
+        'https://res.cloudinary.com/demo/rva/thumbnails/new-fail',
+      );
+      expect(stored?.thumbnailPublicId).toBe('rva/thumbnails/new-fail');
+    });
+
+    it('archiving keeps the asset; hard delete removes it', async () => {
+      const adminToken = await loginAs('super_admin', 'admin-thumb-del@rva.test');
+      const admin = await User.findOne({ email: 'admin-thumb-del@rva.test' });
+      const learner = await User.create({
+        name: 'Learner',
+        email: 'thumb-progress@rva.test',
+        passwordHash: await argon2.hash('test-password-12', { type: argon2.argon2id }),
+        role: 'user',
+      });
+
+      const archivedCourse = await Course.create({
+        title: 'Archive Keeps Image',
+        slug: 'archive-keeps-image',
+        description: 'Has progress',
+        thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/keep-me',
+        thumbnailPublicId: 'rva/thumbnails/keep-me',
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'published',
+        lessonCount: 1,
+        createdBy: admin!._id,
+      });
+      await Progress.create({
+        userId: learner._id,
+        courseId: archivedCourse._id,
+        lessons: [],
+      });
+
+      const archiveRes = await request(app)
+        .delete(`/api/courses/${archivedCourse._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(archiveRes.status).toBe(200);
+      expect(archiveRes.body.course.status).toBe('archived');
+      expect(deleteMock).not.toHaveBeenCalled();
+      const stillThere = await Course.findById(archivedCourse._id);
+      expect(stillThere?.thumbnailPublicId).toBe('rva/thumbnails/keep-me');
+
+      const hardDeleted = await Course.create({
+        title: 'Hard Delete Image',
+        slug: 'hard-delete-image',
+        description: 'No progress',
+        thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/remove-me',
+        thumbnailPublicId: 'rva/thumbnails/remove-me',
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'draft',
+        createdBy: admin!._id,
+      });
+
+      const hardRes = await request(app)
+        .delete(`/api/courses/${hardDeleted._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(hardRes.status).toBe(204);
+      expect(deleteMock).toHaveBeenCalledTimes(1);
+      expect(deleteMock).toHaveBeenCalledWith('rva/thumbnails/remove-me');
+      expect(await Course.findById(hardDeleted._id)).toBeNull();
+    });
+
+    it('thumbnailPublicId is never accepted from a learner-facing request', async () => {
+      const adminToken = await loginAs('super_admin', 'admin-thumb-learner@rva.test');
+      const admin = await User.findOne({ email: 'admin-thumb-learner@rva.test' });
+      const course = await Course.create({
+        title: 'Published With PublicId',
+        slug: 'published-with-public-id',
+        description: 'Visible to learners',
+        thumbnailUrl: 'https://res.cloudinary.com/demo/rva/thumbnails/secret',
+        thumbnailPublicId: 'rva/thumbnails/secret',
+        category: 'Foundations',
+        level: 'beginner',
+        status: 'published',
+        lessonCount: 1,
+        createdBy: admin!._id,
+      });
+
+      const userToken = await loginAs('user', 'learner-thumb@rva.test');
+      const headers = { Authorization: `Bearer ${userToken}` };
+
+      const patch = await request(app)
+        .patch(`/api/courses/${course._id.toString()}`)
+        .set(headers)
+        .send({
+          thumbnailUrl: 'https://cdn.evil.example/owned.jpg',
+          thumbnailPublicId: 'rva/thumbnails/hijacked',
+        });
+      expect(patch.status).toBe(403);
+      expect(patch.body.error.code).toBe('FORBIDDEN');
+
+      const create = await request(app).post('/api/courses').set(headers).send({
+        title: 'Hijack',
+        description: 'Nope',
+        category: 'Foundations',
+        level: 'beginner',
+        thumbnailPublicId: 'rva/thumbnails/hijacked',
+      });
+      expect(create.body.error.code).toBe('FORBIDDEN');
+
+      const list = await request(app).get('/api/courses').set(headers);
+      expect(list.status).toBe(200);
+      expect(list.body.data).toHaveLength(1);
+      expect(list.body.data[0]).not.toHaveProperty('thumbnailPublicId');
+
+      const detail = await request(app)
+        .get(`/api/courses/${course._id.toString()}`)
+        .set(headers);
+      expect(detail.status).toBe(200);
+      expect(detail.body.course).not.toHaveProperty('thumbnailPublicId');
+      expect(JSON.stringify(detail.body)).not.toMatch(/thumbnailPublicId/);
+
+      const unchanged = await Course.findById(course._id);
+      expect(unchanged?.thumbnailPublicId).toBe('rva/thumbnails/secret');
+      expect(deleteMock).not.toHaveBeenCalled();
+
+      const adminGet = await request(app)
+        .get(`/api/courses/${course._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(adminGet.status).toBe(200);
+      expect(adminGet.body.course.thumbnailPublicId).toBe('rva/thumbnails/secret');
+    });
   });
 
   describe('Phase 11 course detail', () => {

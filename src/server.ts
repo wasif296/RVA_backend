@@ -2,14 +2,14 @@ import { createApp } from './app.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { env } from './config/env.js';
 import { assertQuizDocumentsIntegrity } from './models/Quiz.js';
-import { migrateQuizFinalExams } from './scripts/migrate-quiz-final-exams.js';
+import { assertNoStaleQuizIndexes } from './scripts/migrate-quiz-final-exams.js';
 import { logger } from './utils/logger.js';
 
 const FORCE_EXIT_MS = 10_000;
 
 async function main(): Promise<void> {
   await connectDatabase();
-  await migrateQuizFinalExams();
+  await assertNoStaleQuizIndexes();
   await assertQuizDocumentsIntegrity();
 
   const app = createApp();

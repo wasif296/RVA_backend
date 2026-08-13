@@ -12,10 +12,13 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "migrate:quiz-indexes": "tsx src/scripts/migrate-quiz-final-exams.ts"
   },
   "dependencies": {
+    "@upstash/redis": "^1.38.2",
     "argon2": "^0.45.1",
+    "cloudinary": "^2.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

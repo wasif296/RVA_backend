@@ -12,6 +12,8 @@ export interface ICourse {
   slug: string;
   description: string;
   thumbnailUrl?: string;
+  /** Cloudinary public_id only. Null for https URLs and legacy local-disk paths. */
+  thumbnailPublicId?: string | null;
   category: string;
   level: CourseLevel;
   status: CourseStatus;
@@ -35,6 +37,7 @@ const courseSchema = new Schema<ICourse>(
     },
     description: { type: String, required: true },
     thumbnailUrl: { type: String },
+    thumbnailPublicId: { type: String, default: null },
     category: { type: String, required: true, trim: true },
     level: {
       type: String,

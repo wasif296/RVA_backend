@@ -13,6 +13,21 @@ import { logger } from '../utils/logger.js';
 
 const STALE_QUIZ_INDEXES = ['lessonId_1', 'courseId_1'] as const;
 
+/**
+ * Read-only boot check. Never drop or sync indexes here — multiple serverless
+ * instances racing syncIndexes during a deploy is a real hazard.
+ */
+export async function assertNoStaleQuizIndexes(): Promise<void> {
+  const existing = await Quiz.collection.indexes();
+  const names = new Set(existing.map((idx) => idx.name));
+  const stale = STALE_QUIZ_INDEXES.filter((name) => names.has(name));
+  if (stale.length === 0) return;
+
+  throw new Error(
+    `Stale Quiz index(es) still present: ${stale.join(', ')}. Run \`npm run migrate:quiz-indexes\` before serving traffic.`,
+  );
+}
+
 export async function migrateQuizFinalExams(): Promise<{
   droppedIndexes: string[];
   examsNormalized: number;

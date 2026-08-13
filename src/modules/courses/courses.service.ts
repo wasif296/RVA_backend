@@ -10,11 +10,13 @@ import {
 import { Course } from '../../models/Course.js';
 import { Progress } from '../../models/Progress.js';
 import { AppError } from '../../utils/AppError.js';
+import { logger } from '../../utils/logger.js';
 import { slugify } from '../../utils/slugify.js';
 import {
   computeFinalExamUnlocked,
   computeProgressPct,
 } from '../progress/progress.service.js';
+import { getStorageAdapter } from '../uploads/storage.adapter.js';
 import type {
   CreateCourseBody,
   ListCoursesQuery,
@@ -27,6 +29,7 @@ export type CourseDto = {
   slug: string;
   description: string;
   thumbnailUrl: string | null;
+  thumbnailPublicId?: string | null;
   category: string;
   level: CourseLevel;
   status: CourseStatus;
@@ -37,22 +40,26 @@ export type CourseDto = {
   updatedAt: string;
 };
 
-function toCourseDto(course: {
-  _id: Types.ObjectId;
-  title: string;
-  slug: string;
-  description: string;
-  thumbnailUrl?: string;
-  category: string;
-  level: CourseLevel;
-  status: CourseStatus;
-  lessonCount: number;
-  totalDurationSec: number;
-  createdBy: Types.ObjectId;
-  createdAt: Date;
-  updatedAt: Date;
-}): CourseDto {
-  return {
+function toCourseDto(
+  course: {
+    _id: Types.ObjectId;
+    title: string;
+    slug: string;
+    description: string;
+    thumbnailUrl?: string | null;
+    thumbnailPublicId?: string | null;
+    category: string;
+    level: CourseLevel;
+    status: CourseStatus;
+    lessonCount: number;
+    totalDurationSec: number;
+    createdBy: Types.ObjectId;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  opts?: { includePublicId?: boolean },
+): CourseDto {
+  const dto: CourseDto = {
     id: course._id.toString(),
     title: course.title,
     slug: course.slug,
@@ -67,6 +74,21 @@ function toCourseDto(course: {
     createdAt: course.createdAt.toISOString(),
     updatedAt: course.updatedAt.toISOString(),
   };
+  if (opts?.includePublicId !== false) {
+    dto.thumbnailPublicId = course.thumbnailPublicId ?? null;
+  }
+  return dto;
+}
+
+async function deleteStoredThumbnail(publicId: string): Promise<void> {
+  try {
+    await getStorageAdapter().delete(publicId);
+  } catch (error) {
+    logger.warn(
+      { err: error, publicId },
+      'Failed to delete stored thumbnail asset',
+    );
+  }
 }
 
 function escapeRegex(value: string): string {
@@ -128,7 +150,9 @@ export async function listCourses(params: {
   ]);
 
   return {
-    data: rows.map(toCourseDto),
+    data: rows.map((row) =>
+      toCourseDto(row, { includePublicId: params.role === 'super_admin' }),
+    ),
     meta: {
       page: params.query.page,
       limit: params.query.limit,
@@ -579,6 +603,7 @@ export async function createCourse(params: {
     slug,
     description: params.body.description,
     thumbnailUrl: params.body.thumbnailUrl,
+    thumbnailPublicId: params.body.thumbnailPublicId ?? null,
     category: params.body.category,
     level: params.body.level,
     status: params.body.status ?? 'draft',
@@ -610,6 +635,8 @@ export async function updateCourse(params: {
     );
   }
 
+  const previousPublicId = course.thumbnailPublicId ?? null;
+
   if (params.body.title !== undefined) {
     course.title = params.body.title;
     // Slug is immutable after creation — do not regenerate.
@@ -619,6 +646,9 @@ export async function updateCourse(params: {
   }
   if (params.body.thumbnailUrl !== undefined) {
     course.thumbnailUrl = params.body.thumbnailUrl ?? undefined;
+  }
+  if (params.body.thumbnailPublicId !== undefined) {
+    course.thumbnailPublicId = params.body.thumbnailPublicId ?? null;
   }
   if (params.body.category !== undefined) {
     course.category = params.body.category;
@@ -631,6 +661,12 @@ export async function updateCourse(params: {
   }
 
   await course.save();
+
+  const nextPublicId = course.thumbnailPublicId ?? null;
+  if (previousPublicId && previousPublicId !== nextPublicId) {
+    await deleteStoredThumbnail(previousPublicId);
+  }
+
   return toCourseDto(course);
 }
 
@@ -656,7 +692,11 @@ export async function deleteCourse(params: {
     };
   }
 
+  const publicId = course.thumbnailPublicId ?? null;
   await course.deleteOne();
+  if (publicId) {
+    await deleteStoredThumbnail(publicId);
+  }
   return {
     course: toCourseDto(course),
     archived: false,

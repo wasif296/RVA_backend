@@ -23,6 +23,12 @@ export default defineConfig({
       LOG_LEVEL: 'silent',
       UPLOAD_DIR: './uploads-test',
       PUBLIC_UPLOAD_BASE_URL: '/uploads',
+      STORAGE_DRIVER: 'local',
+      CLOUDINARY_CLOUD_NAME: '',
+      CLOUDINARY_API_KEY: '',
+      CLOUDINARY_API_SECRET: '',
+      UPSTASH_REDIS_REST_URL: '',
+      UPSTASH_REDIS_REST_TOKEN: '',
     },
   },
 });

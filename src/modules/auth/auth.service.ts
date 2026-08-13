@@ -62,23 +62,36 @@ async function toPublicUser(user: {
   };
 }
 
+function refreshCookieOptions(): {
+  httpOnly: true;
+  sameSite: 'none' | 'strict';
+  secure: boolean;
+  path: '/api/auth';
+  maxAge?: number;
+} {
+  const isProd = env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    // Cross-origin deploy (Vercel frontend + Vercel backend on different
+    // domains): SameSite=Strict silently drops the refresh cookie on every
+    // credentialed request, so token refresh fails with no obvious error.
+    // None+Secure is required for cross-site cookies. Keep Strict in
+    // development where the Vite proxy keeps /api same-site.
+    sameSite: isProd ? 'none' : 'strict',
+    secure: isProd,
+    path: '/api/auth',
+  };
+}
+
 function setRefreshCookie(res: Response, cookieValue: string): void {
   res.cookie(REFRESH_COOKIE_NAME, cookieValue, {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: env.NODE_ENV === 'production',
-    path: '/api/auth',
+    ...refreshCookieOptions(),
     maxAge: REFRESH_TOKEN_TTL_MS,
   });
 }
 
 function clearRefreshCookie(res: Response): void {
-  res.clearCookie(REFRESH_COOKIE_NAME, {
-    httpOnly: true,
-    sameSite: 'strict',
-    secure: env.NODE_ENV === 'production',
-    path: '/api/auth',
-  });
+  res.clearCookie(REFRESH_COOKIE_NAME, refreshCookieOptions());
 }
 
 async function issueRefreshToken(params: {

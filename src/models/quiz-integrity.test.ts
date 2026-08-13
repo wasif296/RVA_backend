@@ -17,7 +17,10 @@ import {
 } from '../models/index.js';
 import { getLessonLearningDetail } from '../modules/lessons/lessons.service.js';
 import { getLessonQuizForAdmin } from '../modules/quiz/quiz.service.js';
-import { migrateQuizFinalExams } from '../scripts/migrate-quiz-final-exams.js';
+import {
+  assertNoStaleQuizIndexes,
+  migrateQuizFinalExams,
+} from '../scripts/migrate-quiz-final-exams.js';
 import { seedDatabase } from '../scripts/seed.js';
 
 describe('Quiz integrity — scope/courseId + seed', () => {
@@ -378,4 +381,20 @@ describe('Quiz integrity — scope/courseId + seed', () => {
 
     expect(await Quiz.countDocuments({ scope: 'final_exam' })).toBe(2);
   });
+
+  it('assertNoStaleQuizIndexes fails loudly when lessonId_1 exists', async () => {
+    try {
+      await Quiz.collection.dropIndex('lessonId_1');
+    } catch {
+      // may not exist yet
+    }
+    await Quiz.collection.createIndex({ lessonId: 1 }, { unique: true, name: 'lessonId_1' });
+
+    await expect(assertNoStaleQuizIndexes()).rejects.toThrow(/lessonId_1/);
+
+    await Quiz.collection.dropIndex('lessonId_1');
+    await Quiz.syncIndexes();
+    await expect(assertNoStaleQuizIndexes()).resolves.toBeUndefined();
+  });
 });
+
