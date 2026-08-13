@@ -16,7 +16,7 @@ import {
   RefreshToken,
   User,
 } from '../models/index.js';
-import { RULES } from '@shared';
+import { RULES } from '../shared/index.js';
 import { migrateQuizFinalExams } from './migrate-quiz-final-exams.js';
 
 function requireSeedEnv(name: 'SEED_ADMIN_EMAIL' | 'SEED_ADMIN_PASSWORD'): string {

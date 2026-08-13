@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { RULES } from '@shared';
+import { RULES } from '../shared/index.js';
 import {
   assertQuizDocumentsIntegrity,
   Course,

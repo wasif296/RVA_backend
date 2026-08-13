@@ -1,5 +1,5 @@
 import { Types, trusted } from 'mongoose';
-import { RULES, finalExamPassMark } from '@shared';
+import { RULES, finalExamPassMark } from '../../shared/index.js';
 import { Badge } from '../../models/Badge.js';
 import { Course } from '../../models/Course.js';
 import { ExamSubmission } from '../../models/ExamSubmission.js';

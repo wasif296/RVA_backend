@@ -5,7 +5,7 @@ import {
   type Model,
   type Types,
 } from 'mongoose';
-import type { CourseLevel, CourseStatus } from '@shared';
+import type { CourseLevel, CourseStatus } from '../shared/index.js';
 
 export interface ICourse {
   title: string;

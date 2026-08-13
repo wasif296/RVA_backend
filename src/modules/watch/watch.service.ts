@@ -4,7 +4,7 @@
  * Do not write comments or tests that claim manipulation is prevented.
  */
 import { Types, trusted } from 'mongoose';
-import { RULES } from '@shared';
+import { RULES } from '../../shared/index.js';
 import { Course } from '../../models/Course.js';
 import { Lesson } from '../../models/Lesson.js';
 import { Progress, type IProgressLesson } from '../../models/Progress.js';

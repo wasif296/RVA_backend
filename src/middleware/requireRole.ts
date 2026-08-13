@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import type { Role } from '@shared';
+import type { Role } from '../shared/index.js';
 import { AppError } from '../utils/AppError.js';
 
 export function requireRole(...roles: Role[]) {

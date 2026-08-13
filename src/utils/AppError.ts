@@ -1,4 +1,4 @@
-import { HTTP_STATUS_BY_CODE, type ErrorCode } from '@shared';
+import { HTTP_STATUS_BY_CODE, type ErrorCode } from '../shared/index.js';
 
 export class AppError extends Error {
   readonly code: ErrorCode;

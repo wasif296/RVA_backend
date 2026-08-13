@@ -6,7 +6,7 @@
  * ONE `lessonId: null` in the whole collection, so a second course's exam create
  * 11000s while GET correctly reports no exam.
  */
-import { RULES } from '@shared';
+import { RULES } from '../shared/index.js';
 import { connectDatabase, disconnectDatabase } from '../config/db.js';
 import { Quiz } from '../models/Quiz.js';
 import { logger } from '../utils/logger.js';

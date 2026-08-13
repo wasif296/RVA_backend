@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
-import type { Role } from '@shared';
+import type { Role } from '../shared/index.js';
 import { env } from '../config/env.js';
 import { AppError } from './AppError.js';
 

@@ -1,5 +1,5 @@
 import { Types, trusted, type PipelineStage } from 'mongoose';
-import { RULES, finalExamPassMark } from '@shared';
+import { RULES, finalExamPassMark } from '../../shared/index.js';
 import { User } from '../../models/User.js';
 import { AppError } from '../../utils/AppError.js';
 import {

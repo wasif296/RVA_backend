@@ -5,7 +5,7 @@ import {
   type Model,
   type Types,
 } from 'mongoose';
-import { RULES } from '@shared';
+import { RULES } from '../shared/index.js';
 
 export interface IBadge {
   userId: Types.ObjectId;

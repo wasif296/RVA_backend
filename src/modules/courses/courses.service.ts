@@ -6,7 +6,7 @@ import {
   type CourseStatus,
   type Paginated,
   type Role,
-} from '@shared';
+} from '../../shared/index.js';
 import { Course } from '../../models/Course.js';
 import { Progress } from '../../models/Progress.js';
 import { AppError } from '../../utils/AppError.js';

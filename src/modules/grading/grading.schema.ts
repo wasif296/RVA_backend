@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RULES } from '@shared';
+import { RULES } from '../../shared/index.js';
 
 export const examSubmissionIdParamsSchema = z.object({
   id: z.string().min(1),

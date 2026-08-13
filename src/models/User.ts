@@ -5,7 +5,7 @@ import {
   type Model,
   type Types,
 } from 'mongoose';
-import type { Role } from '@shared';
+import type { Role } from '../shared/index.js';
 
 export interface IUser {
   name: string;

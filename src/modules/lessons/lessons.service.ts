@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { RULES } from '@shared';
+import { RULES } from '../../shared/index.js';
 import { Course } from '../../models/Course.js';
 import { Lesson } from '../../models/Lesson.js';
 import { Progress } from '../../models/Progress.js';

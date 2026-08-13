@@ -1,4 +1,4 @@
-import type { Role } from '@shared';
+import type { Role } from '../shared/index.js';
 
 export type AuthUser = {
   id: string;

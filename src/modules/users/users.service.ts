@@ -1,6 +1,6 @@
 import argon2 from 'argon2';
 import { Types, trusted } from 'mongoose';
-import type { Paginated } from '@shared';
+import type { Paginated } from '../../shared/index.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
 import { AppError } from '../../utils/AppError.js';

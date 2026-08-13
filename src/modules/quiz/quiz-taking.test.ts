@@ -3,7 +3,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { RULES } from '@shared';
+import { RULES } from '../../shared/index.js';
 import { createApp } from '../../app.js';
 import { Course } from '../../models/Course.js';
 import { ExamSubmission } from '../../models/ExamSubmission.js';

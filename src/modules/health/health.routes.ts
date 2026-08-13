@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { HealthResponse } from '@shared';
+import type { HealthResponse } from '../../shared/index.js';
 import { databaseStatus } from '../../config/db.js';
 
 export const healthRouter = Router();

@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
-import type { ApiErrorBody, ErrorCode } from '@shared';
+import type { ApiErrorBody, ErrorCode } from '../shared/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../utils/AppError.js';
