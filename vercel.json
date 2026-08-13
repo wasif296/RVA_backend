@@ -1,12 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": null,
-  "outputDirectory": null,
+  "buildCommand": "",
   "installCommand": "npm ci",
   "functions": {
     "api/index.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "src/**"
     }
   },
   "rewrites": [

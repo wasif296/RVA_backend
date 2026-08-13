@@ -36,8 +36,9 @@ npm run migrate:quiz-indexes # deliberate Quiz index repair — not run on boot
 | | |
 |---|---|
 | **Framework preset** | Other (not Express) |
-| **Output directory** | empty — no static `build/` folder |
-| **Vercel entry** | Function `api/index.ts` (Express app; no `app.listen`) |
+| **Vercel build command** | empty (`""`) — do not run `npm run build` on Vercel |
+| **Output directory** | empty — no static `public/` or `build/` folder |
+| **Vercel entry** | Function `api/index.ts` (compiles `src/` directly; no `app.listen`) |
 | **Local start** | `npm start` after `npm run build` |
 
 Required environment variables (names only):

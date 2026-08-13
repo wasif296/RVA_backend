@@ -42,15 +42,15 @@ Change these under **Settings → General → Build & Development Settings**:
 
 | Setting | What to do |
 |---------|------------|
-| **Framework Preset** | Switch **Express → Other**. This is required; vercel.json `framework: null` alone may not clear a preset already saved on the project. |
-| **Build Command** | Turn **Override off** (or clear it). Do not leave a command that implies a static site. vercel.json sets this to `null` so Vercel compiles `api/index.ts` directly. |
-| **Output Directory** | Turn **Override off** and clear `build`. Must be empty. Any value here makes Vercel look for a static folder after the build. |
+| **Framework Preset** | Keep **Other** (not Express, not Vite). |
+| **Build Command** | Override **off**, or override to an empty string. Do **not** leave the dashboard running `npm run build`. vercel.json sets `"buildCommand": ""` so zero-config does not treat `package.json` `"build"` as a static site (that is what produced `No Output Directory named "public"`). |
+| **Output Directory** | Override **off**, value empty. Do not set `public`, `build`, or `dist`. |
 | **Install Command** | `npm ci` (or Override off; vercel.json also sets `npm ci`) |
 | **Node.js Version** | `22.x` |
 
-`vercel.json` declares `api/index.ts` as the Node function and rewrites every path (including `/api/*`) to it. `app.listen` is not used on this path.
+`vercel.json` declares `api/index.ts` as the Node function and rewrites every path (including `/api/*`) to it. `@vercel/node` compiles that file and its `src/` imports (including `src/shared` and `src/modules/uploads`). `includeFiles: "src/**"` also copies the source tree into the function bundle. `app.listen` is not used on this path.
 
-Local `npm run build` still compiles `dist/` for `npm start`. That output is **not** what Vercel runs. The function imports TypeScript from `src/` and Vercel bundles it.
+Local `npm run build` still compiles `dist/` for `npm start`. Vercel does not run that script and does not use `dist/`.
 
 ## Environment variables (names only)
 
