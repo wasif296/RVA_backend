@@ -1,0 +1,39 @@
+export const ERROR_CODES = [
+  'INTERNAL_ERROR',
+  'NOT_FOUND',
+  'VALIDATION_ERROR',
+  'RATE_LIMITED',
+  'UNAUTHENTICATED',
+  'INVALID_CREDENTIALS',
+  'FORBIDDEN',
+  'TOKEN_EXPIRED',
+  'PASSWORD_CHANGE_REQUIRED',
+  'HEARTBEAT_REJECTED',
+  'QUIZ_ALREADY_PASSED',
+  'LESSON_LOCKED',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export interface ApiErrorBody {
+  error: {
+    code: ErrorCode;
+    message: string;
+    details?: unknown;
+  };
+}
+
+export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
+  INTERNAL_ERROR: 500,
+  NOT_FOUND: 404,
+  VALIDATION_ERROR: 400,
+  RATE_LIMITED: 429,
+  UNAUTHENTICATED: 401,
+  INVALID_CREDENTIALS: 401,
+  FORBIDDEN: 403,
+  TOKEN_EXPIRED: 401,
+  PASSWORD_CHANGE_REQUIRED: 403,
+  HEARTBEAT_REJECTED: 400,
+  QUIZ_ALREADY_PASSED: 409,
+  LESSON_LOCKED: 403,
+};
