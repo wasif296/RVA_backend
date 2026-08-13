@@ -1,11 +1,12 @@
 node_modules/
-dist/
-build/
-coverage/
+/dist/
+/build/
+/coverage/
 .env
 .env.local
 *.log
 .DS_Store
 *.tsbuildinfo
-uploads/
-uploads-test/
+# Root local-disk upload dirs only. A bare "uploads/" also ignores src/modules/uploads/.
+/uploads/
+/uploads-test/

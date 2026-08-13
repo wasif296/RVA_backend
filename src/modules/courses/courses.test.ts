@@ -301,7 +301,7 @@ describe('Phase 7A courses', () => {
     const adapter: StorageAdapter = {
       save: vi.fn(async () => ({ key: 'rva/thumbnails/new' })),
       delete: deleteMock,
-      getPublicUrl: (key) => `https://res.cloudinary.com/demo/${key}`,
+      getPublicUrl: (key: string) => `https://res.cloudinary.com/demo/${key}`,
     };
 
     beforeEach(() => {
