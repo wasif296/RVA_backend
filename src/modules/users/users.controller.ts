@@ -79,6 +79,25 @@ export async function updateUser(
   }
 }
 
+export async function deleteUser(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AppError('UNAUTHENTICATED', 'Authentication required');
+    }
+    await usersService.deleteUser({
+      userId: req.params.id as string,
+      actorId: req.user.id,
+    });
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function resetPassword(
   req: Request,
   res: Response,

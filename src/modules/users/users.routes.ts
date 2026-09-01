@@ -27,6 +27,12 @@ usersRouter.patch(
   usersController.updateUser,
 );
 
+usersRouter.delete(
+  '/:id',
+  validate(userIdParamsSchema, 'params'),
+  usersController.deleteUser,
+);
+
 usersRouter.post(
   '/:id/reset-password',
   validate(userIdParamsSchema, 'params'),

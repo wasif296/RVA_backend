@@ -4,7 +4,12 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
+import { Badge } from '../../models/Badge.js';
+import { ExamSubmission } from '../../models/ExamSubmission.js';
 import { InviteToken } from '../../models/InviteToken.js';
+import { Notification } from '../../models/Notification.js';
+import { Progress } from '../../models/Progress.js';
+import { QuizAttempt } from '../../models/QuizAttempt.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
 
@@ -44,6 +49,11 @@ describe('Phase 6 users', () => {
       User.deleteMany({}),
       RefreshToken.deleteMany({}),
       InviteToken.deleteMany({}),
+      Progress.deleteMany({}),
+      QuizAttempt.deleteMany({}),
+      ExamSubmission.deleteMany({}),
+      Badge.deleteMany({}),
+      Notification.deleteMany({}),
     ]);
     sendMock.mockClear();
     sendMock.mockResolvedValue({ data: { id: 'test-email-id' }, error: null });
@@ -104,6 +114,9 @@ describe('Phase 6 users', () => {
       .patch('/api/users/507f1f77bcf86cd799439011')
       .set(headers)
       .send({ name: 'Nope' });
+    const del = await request(app)
+      .delete('/api/users/507f1f77bcf86cd799439011')
+      .set(headers);
     const reset = await request(app)
       .post('/api/users/507f1f77bcf86cd799439011/reset-password')
       .set(headers);
@@ -115,6 +128,8 @@ describe('Phase 6 users', () => {
     expect(list.body.error.code).toBe('FORBIDDEN');
     expect(create.body.error.code).toBe('FORBIDDEN');
     expect(patch.body.error.code).toBe('FORBIDDEN');
+    expect(del.status).toBe(403);
+    expect(del.body.error.code).toBe('FORBIDDEN');
     expect(reset.body.error.code).toBe('FORBIDDEN');
     expect(resend.status).toBe(403);
     expect(resend.body.error.code).toBe('FORBIDDEN');
@@ -340,5 +355,124 @@ describe('Phase 6 users', () => {
     expect(
       page1.body.data.every((u: { status: string }) => u.status === 'pending'),
     ).toBe(true);
+  });
+
+  it('deactivating a user does not free their email for reuse', async () => {
+    const { accessToken } = await createAdmin();
+    const created = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Held Email', email: 'held@rva.test', role: 'user' });
+
+    await request(app)
+      .patch(`/api/users/${created.body.user.id}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ isActive: false });
+
+    const reuse = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'New Person', email: 'held@rva.test', role: 'user' });
+
+    expect(reuse.status).toBe(400);
+    expect(reuse.body.error.code).toBe('VALIDATION_ERROR');
+    expect(await User.findOne({ email: 'held@rva.test' })).not.toBeNull();
+  });
+
+  it('an admin cannot delete themselves', async () => {
+    const { admin, accessToken } = await createAdmin();
+
+    const res = await request(app)
+      .delete(`/api/users/${admin._id.toString()}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(await User.findById(admin._id)).not.toBeNull();
+  });
+
+  it('deleting a user removes related documents and frees the email', async () => {
+    const { accessToken } = await createAdmin();
+    const created = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Erase Me', email: 'erase@rva.test', role: 'user' });
+
+    const userId = created.body.user.id as string;
+    const uid = new mongoose.Types.ObjectId(userId);
+    const courseId = new mongoose.Types.ObjectId();
+    const lessonId = new mongoose.Types.ObjectId();
+    const quizId = new mongoose.Types.ObjectId();
+    const submissionId = new mongoose.Types.ObjectId();
+
+    await Promise.all([
+      Progress.create({ userId: uid, courseId, lessons: [] }),
+      QuizAttempt.create({
+        userId: uid,
+        lessonId,
+        quizId,
+        answers: [0],
+        score: 1,
+        maxScore: 1,
+        correctCount: 1,
+        pointsDelta: 1,
+        attemptNumber: 1,
+      }),
+      ExamSubmission.create({
+        _id: submissionId,
+        userId: uid,
+        courseId,
+        examId: quizId,
+        docUrl: 'https://example.com/doc',
+        status: 'submitted',
+        submittedAt: new Date(),
+      }),
+      Badge.create({
+        userId: uid,
+        courseId,
+        courseTitle: 'Gone',
+        examSubmissionId: submissionId,
+        marksAwarded: 40,
+        maxMarks: 50,
+        earnedAt: new Date(),
+      }),
+      Notification.create({
+        userId: uid,
+        type: 'exam_graded',
+        title: 'Graded',
+        body: 'Body',
+        link: '/progress',
+        metadata: { courseId: courseId.toString() },
+      }),
+      RefreshToken.create({
+        userId: uid,
+        tokenHash: 'hash-not-a-real-token',
+        expiresAt: new Date(Date.now() + 60_000),
+      }),
+    ]);
+    expect(await InviteToken.countDocuments({ userId: uid })).toBeGreaterThan(0);
+
+    const res = await request(app)
+      .delete(`/api/users/${userId}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(204);
+    expect(await User.findById(userId)).toBeNull();
+    expect(await Progress.countDocuments({ userId: uid })).toBe(0);
+    expect(await QuizAttempt.countDocuments({ userId: uid })).toBe(0);
+    expect(await ExamSubmission.countDocuments({ userId: uid })).toBe(0);
+    expect(await Badge.countDocuments({ userId: uid })).toBe(0);
+    expect(await Notification.countDocuments({ userId: uid })).toBe(0);
+    expect(await RefreshToken.countDocuments({ userId: uid })).toBe(0);
+    expect(await InviteToken.countDocuments({ userId: uid })).toBe(0);
+
+    const recreate = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'New Owner', email: 'erase@rva.test', role: 'user' });
+
+    expect(recreate.status).toBe(201);
+    expect(recreate.body.user.email).toBe('erase@rva.test');
+    expect(recreate.body.user.id).not.toBe(userId);
   });
 });

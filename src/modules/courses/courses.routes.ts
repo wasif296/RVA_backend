@@ -22,6 +22,13 @@ coursesRouter.get(
 );
 
 coursesRouter.get(
+  '/:id/deletion-impact',
+  requireRole('super_admin'),
+  validate(courseIdParamsSchema, 'params'),
+  coursesController.getCourseDeletionImpact,
+);
+
+coursesRouter.get(
   '/:id',
   validate(courseIdParamsSchema, 'params'),
   coursesController.getCourse,

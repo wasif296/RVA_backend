@@ -92,17 +92,25 @@ export async function deleteCourse(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const result = await coursesService.deleteCourse({
+    await coursesService.deleteCourse({
       courseId: req.params.id as string,
     });
-    if (result.archived) {
-      res.json({
-        course: result.course,
-        message: 'Course has learner progress and was archived instead of deleted',
-      });
-      return;
-    }
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getCourseDeletionImpact(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const impact = await coursesService.getCourseDeletionImpact({
+      courseId: req.params.id as string,
+    });
+    res.json(impact);
   } catch (error) {
     next(error);
   }

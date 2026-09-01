@@ -9,6 +9,9 @@ import { Lesson } from '../../models/Lesson.js';
 import { Progress } from '../../models/Progress.js';
 import { Quiz } from '../../models/Quiz.js';
 import { QuizAttempt } from '../../models/QuizAttempt.js';
+import { ExamSubmission } from '../../models/ExamSubmission.js';
+import { Badge } from '../../models/Badge.js';
+import { Notification } from '../../models/Notification.js';
 import { User } from '../../models/User.js';
 import { slugify } from '../../utils/slugify.js';
 import {
@@ -39,6 +42,9 @@ describe('Phase 7A courses', () => {
       Lesson.deleteMany({}),
       Quiz.deleteMany({}),
       QuizAttempt.deleteMany({}),
+      ExamSubmission.deleteMany({}),
+      Badge.deleteMany({}),
+      Notification.deleteMany({}),
     ]);
   });
 
@@ -157,10 +163,14 @@ describe('Phase 7A courses', () => {
     const del = await request(app)
       .delete('/api/courses/507f1f77bcf86cd799439011')
       .set(headers);
+    const impact = await request(app)
+      .get('/api/courses/507f1f77bcf86cd799439011/deletion-impact')
+      .set(headers);
 
     expect(create.body.error.code).toBe('FORBIDDEN');
     expect(patch.body.error.code).toBe('FORBIDDEN');
     expect(del.body.error.code).toBe('FORBIDDEN');
+    expect(impact.body.error.code).toBe('FORBIDDEN');
   });
 
   it('slug collisions produce course-2, course-3', async () => {
@@ -242,7 +252,7 @@ describe('Phase 7A courses', () => {
     expect(publish.body.error.message).toMatch(/zero lessons/i);
   });
 
-  it('deleting a course that has progress archives it instead of removing it', async () => {
+  it('deleting a course with progress permanently removes it and related records', async () => {
     const adminToken = await loginAs('super_admin', 'admin7@rva.test');
     const admin = await User.findOne({ email: 'admin7@rva.test' });
     const learner = await User.create({
@@ -250,6 +260,7 @@ describe('Phase 7A courses', () => {
       email: 'progress@rva.test',
       passwordHash: await argon2.hash('test-password-12', { type: argon2.argon2id }),
       role: 'user',
+      totalPoints: 0,
     });
     const course = await Course.create({
       title: 'With Progress',
@@ -261,22 +272,178 @@ describe('Phase 7A courses', () => {
       lessonCount: 1,
       createdBy: admin!._id,
     });
+    const lesson = await Lesson.create({
+      courseId: course._id,
+      title: 'Lesson One',
+      description: 'L',
+      youtubeVideoId: 'abcdefghijk',
+      durationSec: 60,
+      order: 1,
+    });
+    const quiz = await Quiz.create({
+      scope: 'lesson',
+      courseId: course._id,
+      lessonId: lesson._id,
+      title: 'Quiz',
+      pointsPerQuestion: 1,
+      questions: [
+        { text: 'Q?', options: ['A', 'B'], correctIndex: 0, order: 0 },
+      ],
+    });
+    const exam = await Quiz.create({
+      scope: 'final_exam',
+      courseId: course._id,
+      lessonId: null,
+      title: 'Final',
+      instructions: 'Write',
+      questions: [{ text: 'Exam?', options: [], order: 0 }],
+    });
     await Progress.create({
       userId: learner._id,
       courseId: course._id,
       lessons: [],
     });
+    await QuizAttempt.create({
+      userId: learner._id,
+      lessonId: lesson._id,
+      quizId: quiz._id,
+      answers: [0],
+      score: 1,
+      maxScore: 1,
+      correctCount: 1,
+      pointsDelta: 1,
+      attemptNumber: 1,
+    });
+    const submission = await ExamSubmission.create({
+      userId: learner._id,
+      courseId: course._id,
+      examId: exam._id,
+      docUrl: 'https://example.com/exam',
+      status: 'submitted',
+      submittedAt: new Date(),
+    });
+    await Badge.create({
+      userId: learner._id,
+      courseId: course._id,
+      courseTitle: 'With Progress',
+      examSubmissionId: submission._id,
+      marksAwarded: 40,
+      maxMarks: 50,
+      earnedAt: new Date(),
+    });
+
+    const impact = await request(app)
+      .get(`/api/courses/${course._id.toString()}/deletion-impact`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(impact.status).toBe(200);
+    expect(impact.body.learnersWithProgress).toBe(1);
 
     const res = await request(app)
       .delete(`/api/courses/${course._id.toString()}`)
       .set('Authorization', `Bearer ${adminToken}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.course.status).toBe('archived');
-    expect(res.body.message).toMatch(/archived/i);
+    expect(res.status).toBe(204);
+    expect(await Course.findById(course._id)).toBeNull();
+    expect(await Lesson.findById(lesson._id)).toBeNull();
+    expect(await Quiz.findById(quiz._id)).toBeNull();
+    expect(await Quiz.findById(exam._id)).toBeNull();
+    expect(await Progress.countDocuments({ courseId: course._id })).toBe(0);
+    expect(await QuizAttempt.countDocuments({ lessonId: lesson._id })).toBe(0);
+    expect(await ExamSubmission.countDocuments({ courseId: course._id })).toBe(0);
+    expect(await Badge.countDocuments({ courseId: course._id })).toBe(0);
+  });
 
-    const stillThere = await Course.findById(course._id);
-    expect(stillThere?.status).toBe('archived');
+  it('deleting a course subtracts that course\'s points from affected users', async () => {
+    const adminToken = await loginAs('super_admin', 'admin-pts-del@rva.test');
+    const admin = await User.findOne({ email: 'admin-pts-del@rva.test' });
+    const learner = await User.create({
+      name: 'Points Learner',
+      email: 'points-del@rva.test',
+      passwordHash: await argon2.hash('test-password-12', { type: argon2.argon2id }),
+      role: 'user',
+      totalPoints: 27,
+    });
+    const other = await User.create({
+      name: 'Untouched',
+      email: 'untouched-del@rva.test',
+      passwordHash: await argon2.hash('test-password-12', { type: argon2.argon2id }),
+      role: 'user',
+      totalPoints: 40,
+    });
+    const doomed = await Course.create({
+      title: 'Doomed',
+      slug: 'doomed',
+      description: 'Will be deleted',
+      category: 'Foundations',
+      level: 'beginner',
+      status: 'published',
+      lessonCount: 1,
+      createdBy: admin!._id,
+    });
+    const kept = await Course.create({
+      title: 'Kept',
+      slug: 'kept',
+      description: 'Stays',
+      category: 'Foundations',
+      level: 'beginner',
+      status: 'published',
+      lessonCount: 1,
+      createdBy: admin!._id,
+    });
+    const doomedLesson = await Lesson.create({
+      courseId: doomed._id,
+      title: 'Doomed lesson',
+      description: 'L',
+      youtubeVideoId: 'abcdefghijk',
+      durationSec: 60,
+      order: 1,
+    });
+    await Progress.create({
+      userId: learner._id,
+      courseId: doomed._id,
+      lessons: [
+        {
+          lessonId: doomedLesson._id,
+          watchedSec: 60,
+          videoPointsAwarded: true,
+          bestQuizScore: 2,
+          quizPointsAwarded: 2,
+          attempts: 1,
+        },
+      ],
+    });
+    await ExamSubmission.create({
+      userId: learner._id,
+      courseId: doomed._id,
+      examId: new mongoose.Types.ObjectId(),
+      docUrl: 'https://example.com/exam',
+      status: 'graded',
+      submittedAt: new Date(),
+      marksAwarded: 20,
+    });
+    await Progress.create({
+      userId: learner._id,
+      courseId: kept._id,
+      lessons: [],
+    });
+
+    const impact = await request(app)
+      .get(`/api/courses/${doomed._id.toString()}/deletion-impact`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(impact.status).toBe(200);
+    expect(impact.body.learnersWithProgress).toBe(1);
+    expect(impact.body.pointsAtStake).toBe(27);
+
+    const res = await request(app)
+      .delete(`/api/courses/${doomed._id.toString()}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(204);
+    expect(await Course.findById(doomed._id)).toBeNull();
+    expect(await Course.findById(kept._id)).not.toBeNull();
+    expect((await User.findById(learner._id))?.totalPoints).toBe(0);
+    expect((await User.findById(other._id))?.totalPoints).toBe(40);
+    expect(await Progress.countDocuments({ courseId: kept._id })).toBe(1);
   });
 
   it('a non-https thumbnailUrl is rejected', async () => {
@@ -442,8 +609,9 @@ describe('Phase 7A courses', () => {
       });
 
       const archiveRes = await request(app)
-        .delete(`/api/courses/${archivedCourse._id.toString()}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .patch(`/api/courses/${archivedCourse._id.toString()}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'archived' });
 
       expect(archiveRes.status).toBe(200);
       expect(archiveRes.body.course.status).toBe('archived');

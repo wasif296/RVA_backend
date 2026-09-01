@@ -8,7 +8,14 @@ import {
   type Role,
 } from '../../shared/index.js';
 import { Course } from '../../models/Course.js';
+import { Lesson } from '../../models/Lesson.js';
 import { Progress } from '../../models/Progress.js';
+import { Quiz } from '../../models/Quiz.js';
+import { QuizAttempt } from '../../models/QuizAttempt.js';
+import { ExamSubmission } from '../../models/ExamSubmission.js';
+import { Badge } from '../../models/Badge.js';
+import { Notification } from '../../models/Notification.js';
+import { User } from '../../models/User.js';
 import { AppError } from '../../utils/AppError.js';
 import { logger } from '../../utils/logger.js';
 import { slugify } from '../../utils/slugify.js';
@@ -672,9 +679,107 @@ export async function updateCourse(params: {
   return toCourseDto(course);
 }
 
+export type CourseDeletionImpact = {
+  learnersWithProgress: number;
+  pointsAtStake: number;
+};
+
+function lessonPointsEarned(lessons: { videoPointsAwarded?: boolean; quizPointsAwarded?: number }[]): number {
+  let points = 0;
+  for (const lesson of lessons) {
+    if (lesson.videoPointsAwarded) {
+      points += RULES.VIDEO_POINTS;
+    }
+    points += lesson.quizPointsAwarded ?? 0;
+  }
+  return points;
+}
+
+async function coursePointsByUser(courseId: Types.ObjectId): Promise<{
+  learnersWithProgress: number;
+  pointsAtStake: number;
+  pointsByUser: Map<string, number>;
+}> {
+  const [progressRows, examRows] = await Promise.all([
+    Progress.find({ courseId }).select('userId lessons').lean(),
+    ExamSubmission.find({ courseId, status: 'graded' }).select('userId marksAwarded').lean(),
+  ]);
+
+  const pointsByUser = new Map<string, number>();
+  const add = (userId: Types.ObjectId, amount: number) => {
+    if (amount <= 0) return;
+    const key = userId.toString();
+    pointsByUser.set(key, (pointsByUser.get(key) ?? 0) + amount);
+  };
+
+  for (const row of progressRows) {
+    add(row.userId, lessonPointsEarned(row.lessons ?? []));
+  }
+  for (const row of examRows) {
+    if (typeof row.marksAwarded === 'number') {
+      add(row.userId, row.marksAwarded);
+    }
+  }
+
+  let pointsAtStake = 0;
+  for (const amount of pointsByUser.values()) {
+    pointsAtStake += amount;
+  }
+
+  return {
+    learnersWithProgress: progressRows.length,
+    pointsAtStake,
+    pointsByUser,
+  };
+}
+
+export async function getCourseDeletionImpact(params: {
+  courseId: string;
+}): Promise<CourseDeletionImpact> {
+  if (!Types.ObjectId.isValid(params.courseId)) {
+    throw AppError.notFound('Course not found');
+  }
+
+  const course = await Course.findById(params.courseId).select('_id');
+  if (!course) {
+    throw AppError.notFound('Course not found');
+  }
+
+  const impact = await coursePointsByUser(course._id);
+  return {
+    learnersWithProgress: impact.learnersWithProgress,
+    pointsAtStake: impact.pointsAtStake,
+  };
+}
+
+async function subtractCoursePoints(pointsByUser: Map<string, number>): Promise<void> {
+  if (pointsByUser.size === 0) return;
+
+  const ids = [...pointsByUser.keys()].map((id) => new Types.ObjectId(id));
+  const users = await User.find({ _id: trusted({ $in: ids }) })
+    .select('totalPoints')
+    .lean();
+
+  if (users.length === 0) return;
+
+  await User.bulkWrite(
+    users.map((user) => {
+      const remove = pointsByUser.get(user._id.toString()) ?? 0;
+      return {
+        updateOne: {
+          filter: { _id: user._id },
+          update: {
+            $set: { totalPoints: Math.max(0, (user.totalPoints ?? 0) - remove) },
+          },
+        },
+      };
+    }),
+  );
+}
+
 export async function deleteCourse(params: {
   courseId: string;
-}): Promise<{ course: CourseDto; archived: boolean }> {
+}): Promise<void> {
   if (!Types.ObjectId.isValid(params.courseId)) {
     throw AppError.notFound('Course not found');
   }
@@ -684,23 +789,30 @@ export async function deleteCourse(params: {
     throw AppError.notFound('Course not found');
   }
 
-  const hasProgress = await Progress.exists({ courseId: course._id });
-  if (hasProgress) {
-    course.status = 'archived';
-    await course.save();
-    return {
-      course: toCourseDto(course),
-      archived: true,
-    };
+  const courseId = course._id;
+  const impact = await coursePointsByUser(courseId);
+  await subtractCoursePoints(impact.pointsByUser);
+
+  const lessons = await Lesson.find({ courseId }).select('_id').lean();
+  const lessonIds = lessons.map((lesson) => lesson._id);
+  if (lessonIds.length > 0) {
+    await QuizAttempt.deleteMany({
+      lessonId: trusted({ $in: lessonIds }),
+    });
   }
+
+  await Promise.all([
+    Quiz.deleteMany({ courseId }),
+    ExamSubmission.deleteMany({ courseId }),
+    Badge.deleteMany({ courseId }),
+    Progress.deleteMany({ courseId }),
+    Lesson.deleteMany({ courseId }),
+    Notification.deleteMany({ 'metadata.courseId': courseId.toString() }),
+  ]);
 
   const publicId = course.thumbnailPublicId ?? null;
   await course.deleteOne();
   if (publicId) {
     await deleteStoredThumbnail(publicId);
   }
-  return {
-    course: toCourseDto(course),
-    archived: false,
-  };
 }

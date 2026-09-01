@@ -1,6 +1,12 @@
 import { Types, trusted } from 'mongoose';
 import { env } from '../../config/env.js';
 import type { Paginated } from '../../shared/index.js';
+import { Badge } from '../../models/Badge.js';
+import { ExamSubmission } from '../../models/ExamSubmission.js';
+import { InviteToken } from '../../models/InviteToken.js';
+import { Notification } from '../../models/Notification.js';
+import { Progress } from '../../models/Progress.js';
+import { QuizAttempt } from '../../models/QuizAttempt.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
 import { AppError } from '../../utils/AppError.js';
@@ -251,6 +257,36 @@ export async function updateUser(params: {
 
   await user.save();
   return toAdminUser(user);
+}
+
+export async function deleteUser(params: {
+  userId: string;
+  actorId: string;
+}): Promise<void> {
+  if (!Types.ObjectId.isValid(params.userId)) {
+    throw AppError.notFound('User not found');
+  }
+
+  if (params.userId === params.actorId) {
+    throw new AppError('VALIDATION_ERROR', 'You cannot delete your own account');
+  }
+
+  const user = await User.findById(params.userId);
+  if (!user) {
+    throw AppError.notFound('User not found');
+  }
+
+  const userId = user._id;
+  await Promise.all([
+    Progress.deleteMany({ userId }),
+    QuizAttempt.deleteMany({ userId }),
+    ExamSubmission.deleteMany({ userId }),
+    Badge.deleteMany({ userId }),
+    RefreshToken.deleteMany({ userId }),
+    InviteToken.deleteMany({ userId }),
+    Notification.deleteMany({ userId }),
+  ]);
+  await user.deleteOne();
 }
 
 export async function resetPassword(params: {
