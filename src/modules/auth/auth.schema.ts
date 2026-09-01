@@ -14,5 +14,15 @@ export const changePasswordBodySchema = z.object({
   newPassword: passwordSchema,
 });
 
+export const inviteTokenParamsSchema = z.object({
+  token: z.string().min(1),
+});
+
+export const acceptInviteBodySchema = z.object({
+  password: passwordSchema,
+});
+
 export type LoginBody = z.infer<typeof loginBodySchema>;
 export type ChangePasswordBody = z.infer<typeof changePasswordBodySchema>;
+export type InviteTokenParams = z.infer<typeof inviteTokenParamsSchema>;
+export type AcceptInviteBody = z.infer<typeof acceptInviteBodySchema>;

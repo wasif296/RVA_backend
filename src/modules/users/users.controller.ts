@@ -30,8 +30,29 @@ export async function createUser(
     const result = await usersService.createUser({
       body,
       createdById: req.user.id,
+      createdByName: req.user.name,
     });
     res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function resendInvite(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AppError('UNAUTHENTICATED', 'Authentication required');
+    }
+    const result = await usersService.resendInvite({
+      userId: req.params.id as string,
+      createdById: req.user.id,
+      createdByName: req.user.name,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -64,8 +85,13 @@ export async function resetPassword(
   next: NextFunction,
 ): Promise<void> {
   try {
+    if (!req.user) {
+      throw new AppError('UNAUTHENTICATED', 'Authentication required');
+    }
     const result = await usersService.resetPassword({
       userId: req.params.id as string,
+      createdById: req.user.id,
+      createdByName: req.user.name,
     });
     res.json(result);
   } catch (error) {

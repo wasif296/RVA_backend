@@ -20,6 +20,9 @@ export default defineConfig({
       CLOUDINARY_API_SECRET: '',
       UPSTASH_REDIS_REST_URL: '',
       UPSTASH_REDIS_REST_TOKEN: '',
+      RESEND_API_KEY: 're_test_0000000000000000000000',
+      EMAIL_FROM: 'RVA Academy <no-reply@rva.test>',
+      APP_URL: 'http://localhost:5173',
     },
   },
 });

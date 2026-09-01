@@ -4,8 +4,10 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
+import { InviteToken } from '../../models/InviteToken.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
+import { issueInviteToken } from './inviteToken.service.js';
 
 function extractRefreshCookie(setCookie: string[] | string | undefined): string {
   const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
@@ -31,7 +33,11 @@ describe('Phase 4 auth', () => {
   });
 
   beforeEach(async () => {
-    await Promise.all([User.deleteMany({}), RefreshToken.deleteMany({})]);
+    await Promise.all([
+      User.deleteMany({}),
+      RefreshToken.deleteMany({}),
+      InviteToken.deleteMany({}),
+    ]);
   });
 
   async function createUser(overrides?: {
@@ -269,5 +275,141 @@ describe('Phase 4 auth', () => {
 
     expect(limited.status).toBe(429);
     expect(limited.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('a user with no passwordHash gets the identical generic error as a wrong password', async () => {
+    await User.create({
+      name: 'Pending',
+      email: 'pending@rva.test',
+      role: 'user',
+    });
+    const { password } = await createUser({ email: 'active@rva.test' });
+
+    const noPassword = await request(app).post('/api/auth/login').send({
+      email: 'pending@rva.test',
+      password,
+    });
+    const wrongPassword = await request(app).post('/api/auth/login').send({
+      email: 'active@rva.test',
+      password: 'definitely-wrong-password',
+    });
+
+    expect(noPassword.status).toBe(401);
+    expect(wrongPassword.status).toBe(401);
+    expect(noPassword.body).toEqual(wrongPassword.body);
+    expect(noPassword.body.error.code).toBe('INVALID_CREDENTIALS');
+    expect(JSON.stringify(noPassword.body)).not.toMatch(/activat/i);
+  });
+
+  it('GET /invite/:token returns only name and email', async () => {
+    const user = await User.create({
+      name: 'Invited Learner',
+      email: 'invited@rva.test',
+      role: 'user',
+    });
+    const token = await issueInviteToken({ userId: user._id, purpose: 'invite' });
+
+    const res = await request(app).get(`/api/auth/invite/${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'Invited Learner', email: 'invited@rva.test' });
+  });
+
+  it('an invite token works once, then is rejected as used', async () => {
+    const user = await User.create({
+      name: 'Once Only',
+      email: 'once@rva.test',
+      role: 'user',
+    });
+    const token = await issueInviteToken({ userId: user._id, purpose: 'invite' });
+
+    const first = await request(app)
+      .post(`/api/auth/invite/${token}/accept`)
+      .send({ password: 'brand-new-password-1' });
+    expect(first.status).toBe(200);
+    expect(first.body.accessToken).toEqual(expect.any(String));
+    expect(first.body.user.email).toBe('once@rva.test');
+    expect(first.body.user.mustChangePassword).toBe(false);
+
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${first.body.accessToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.user.email).toBe('once@rva.test');
+
+    const second = await request(app)
+      .post(`/api/auth/invite/${token}/accept`)
+      .send({ password: 'another-password-12' });
+    const secondGet = await request(app).get(`/api/auth/invite/${token}`);
+
+    expect(second.status).toBe(400);
+    expect(secondGet.status).toBe(400);
+    expect(second.body).toEqual(secondGet.body);
+    expect(second.body.error.code).toBe('INVALID_INVITE_TOKEN');
+    expect(second.body.error.message).toBe('This link is invalid or has expired');
+  });
+
+  it('accepting an invite returns a working access token', async () => {
+    const user = await User.create({
+      name: 'Token User',
+      email: 'tokenuser@rva.test',
+      role: 'user',
+    });
+    const token = await issueInviteToken({ userId: user._id, purpose: 'invite' });
+
+    const accept = await request(app)
+      .post(`/api/auth/invite/${token}/accept`)
+      .send({ password: 'working-access-12' });
+
+    expect(accept.status).toBe(200);
+    expect(accept.body.accessToken).toEqual(expect.any(String));
+    expect(extractRefreshCookie(accept.headers['set-cookie'])).toMatch(/^refreshToken=/);
+
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${accept.body.accessToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.user.email).toBe('tokenuser@rva.test');
+    expect(me.body.user.mustChangePassword).toBe(false);
+  });
+
+  it('expired and tampered tokens are rejected with the same generic error', async () => {
+    const user = await User.create({
+      name: 'Expiry',
+      email: 'expiry@rva.test',
+      role: 'user',
+    });
+    const expiredToken = await issueInviteToken({ userId: user._id, purpose: 'invite' });
+    await InviteToken.updateMany(
+      { userId: user._id, purpose: 'invite' },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } },
+    );
+
+    const other = await User.create({
+      name: 'Tamper',
+      email: 'tamper@rva.test',
+      role: 'user',
+    });
+    const realToken = await issueInviteToken({ userId: other._id, purpose: 'invite' });
+    const tamperedToken = `${realToken.slice(0, -1)}${realToken.endsWith('a') ? 'b' : 'a'}`;
+
+    const expiredGet = await request(app).get(`/api/auth/invite/${expiredToken}`);
+    const expiredPost = await request(app)
+      .post(`/api/auth/invite/${expiredToken}/accept`)
+      .send({ password: 'brand-new-password-1' });
+    const tamperedGet = await request(app).get(`/api/auth/invite/${tamperedToken}`);
+    const tamperedPost = await request(app)
+      .post(`/api/auth/invite/${tamperedToken}/accept`)
+      .send({ password: 'brand-new-password-1' });
+
+    expect(expiredGet.status).toBe(400);
+    expect(expiredPost.status).toBe(400);
+    expect(tamperedGet.status).toBe(400);
+    expect(tamperedPost.status).toBe(400);
+    expect(expiredGet.body).toEqual(expiredPost.body);
+    expect(expiredGet.body).toEqual(tamperedGet.body);
+    expect(expiredGet.body).toEqual(tamperedPost.body);
+    expect(expiredGet.body.error.code).toBe('INVALID_INVITE_TOKEN');
+    expect(expiredGet.body.error.message).toBe('This link is invalid or has expired');
   });
 });

@@ -49,6 +49,11 @@ const envSchema = z
     CLOUDINARY_API_SECRET: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
     UPSTASH_REDIS_REST_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
     UPSTASH_REDIS_REST_TOKEN: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+    /** Absent in development: email.ts logs the full message instead of sending. */
+    RESEND_API_KEY: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+    EMAIL_FROM: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+    /** Frontend origin used to build invite/reset links — required in every environment. */
+    APP_URL: z.string().min(1).url(),
   })
   .superRefine((data, ctx) => {
     if (data.STORAGE_DRIVER === 'cloudinary') {
@@ -91,6 +96,21 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['UPSTASH_REDIS_REST_TOKEN'],
         message: 'UPSTASH_REDIS_REST_TOKEN is required in production for shared rate limits',
+      });
+    }
+
+    if (!data.RESEND_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RESEND_API_KEY'],
+        message: 'RESEND_API_KEY is required in production to send invite/reset emails',
+      });
+    }
+    if (!data.EMAIL_FROM) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMAIL_FROM'],
+        message: 'EMAIL_FROM is required in production to send invite/reset emails',
       });
     }
   });

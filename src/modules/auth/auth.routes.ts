@@ -1,12 +1,21 @@
 import { Router } from 'express';
 import { env } from '../../config/env.js';
 import { authenticate } from '../../middleware/authenticate.js';
-import { loginRateLimiter, refreshRateLimiter } from '../../middleware/rateLimit.js';
+import {
+  inviteRateLimiter,
+  loginRateLimiter,
+  refreshRateLimiter,
+} from '../../middleware/rateLimit.js';
 import { requirePasswordCurrent } from '../../middleware/requirePasswordCurrent.js';
 import { requireRole } from '../../middleware/requireRole.js';
 import { validate } from '../../middleware/validate.js';
 import * as authController from './auth.controller.js';
-import { changePasswordBodySchema, loginBodySchema } from './auth.schema.js';
+import {
+  acceptInviteBodySchema,
+  changePasswordBodySchema,
+  inviteTokenParamsSchema,
+  loginBodySchema,
+} from './auth.schema.js';
 
 export const authRouter = Router();
 
@@ -34,6 +43,21 @@ authRouter.post(
   requirePasswordCurrent,
   validate(changePasswordBodySchema, 'body'),
   authController.changePassword,
+);
+
+authRouter.get(
+  '/invite/:token',
+  inviteRateLimiter,
+  validate(inviteTokenParamsSchema, 'params'),
+  authController.getInvite,
+);
+
+authRouter.post(
+  '/invite/:token/accept',
+  inviteRateLimiter,
+  validate(inviteTokenParamsSchema, 'params'),
+  validate(acceptInviteBodySchema, 'body'),
+  authController.acceptInvite,
 );
 
 if (env.NODE_ENV === 'test') {

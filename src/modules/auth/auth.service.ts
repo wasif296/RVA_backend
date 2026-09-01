@@ -17,8 +17,10 @@ import {
   verifyRefreshSecret,
 } from '../../utils/tokens.js';
 import { listBadgesForUser, type BadgeDto } from '../grading/grading.service.js';
+import { findValidInviteToken } from './inviteToken.service.js';
 
 const GENERIC_CREDENTIALS_MESSAGE = 'Invalid email or password';
+const GENERIC_INVITE_MESSAGE = 'This link is invalid or has expired';
 
 export type PublicUser = {
   id: string;
@@ -277,4 +279,59 @@ export async function changePassword(params: {
 
   await revokeAllUserRefreshTokens(user._id);
   clearRefreshCookie(params.res);
+}
+
+export async function getInviteInfo(token: string): Promise<{ name: string; email: string }> {
+  const tokenDoc = await findValidInviteToken(token);
+  if (!tokenDoc) {
+    throw new AppError('INVALID_INVITE_TOKEN', GENERIC_INVITE_MESSAGE);
+  }
+
+  const user = await User.findById(tokenDoc.userId);
+  if (!user || !user.isActive) {
+    throw new AppError('INVALID_INVITE_TOKEN', GENERIC_INVITE_MESSAGE);
+  }
+
+  return { name: user.name, email: user.email };
+}
+
+export async function acceptInvite(params: {
+  token: string;
+  password: string;
+  userAgent?: string;
+  res: Response;
+}): Promise<{ user: PublicUser; accessToken: string }> {
+  const tokenDoc = await findValidInviteToken(params.token);
+  if (!tokenDoc) {
+    throw new AppError('INVALID_INVITE_TOKEN', GENERIC_INVITE_MESSAGE);
+  }
+
+  const user = await User.findById(tokenDoc.userId).select('+passwordHash');
+  if (!user || !user.isActive) {
+    throw new AppError('INVALID_INVITE_TOKEN', GENERIC_INVITE_MESSAGE);
+  }
+
+  user.passwordHash = await argon2.hash(params.password, { type: argon2.argon2id });
+  user.mustChangePassword = false;
+  user.tokenVersion += 1;
+  user.lastLoginAt = new Date();
+  await user.save();
+  await revokeAllUserRefreshTokens(user._id);
+
+  tokenDoc.usedAt = new Date();
+  await tokenDoc.save();
+
+  const accessToken = signAccessToken({
+    sub: user._id.toString(),
+    role: user.role,
+    tokenVersion: user.tokenVersion,
+  });
+
+  const cookieValue = await issueRefreshToken({
+    userId: user._id,
+    userAgent: params.userAgent,
+  });
+  setRefreshCookie(params.res, cookieValue);
+
+  return { user: await toPublicUser(user), accessToken };
 }

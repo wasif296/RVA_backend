@@ -2,19 +2,27 @@ import argon2 from 'argon2';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../app.js';
+import { InviteToken } from '../../models/InviteToken.js';
 import { RefreshToken } from '../../models/RefreshToken.js';
 import { User } from '../../models/User.js';
-import { generatePassword } from '../../utils/generatePassword.js';
 
-function extractRefreshCookie(setCookie: string[] | string | undefined): string {
-  const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
-  const refresh = cookies.find((value) => value.startsWith('refreshToken='));
-  if (!refresh) {
-    throw new Error('refreshToken cookie not set');
+const sendMock = vi.fn().mockResolvedValue({ data: { id: 'test-email-id' }, error: null });
+
+vi.mock('resend', () => ({
+  Resend: vi.fn().mockImplementation(() => ({
+    emails: { send: sendMock },
+  })),
+}));
+
+function extractInviteToken(): string {
+  const lastCall = sendMock.mock.calls.at(-1)?.[0] as { text: string } | undefined;
+  const match = lastCall?.text.match(/\/invite\/([0-9a-f]{64})/);
+  if (!match) {
+    throw new Error('invite token not found in the last sent email');
   }
-  return refresh.split(';')[0] ?? refresh;
+  return match[1] as string;
 }
 
 describe('Phase 6 users', () => {
@@ -32,7 +40,13 @@ describe('Phase 6 users', () => {
   });
 
   beforeEach(async () => {
-    await Promise.all([User.deleteMany({}), RefreshToken.deleteMany({})]);
+    await Promise.all([
+      User.deleteMany({}),
+      RefreshToken.deleteMany({}),
+      InviteToken.deleteMany({}),
+    ]);
+    sendMock.mockClear();
+    sendMock.mockResolvedValue({ data: { id: 'test-email-id' }, error: null });
   });
 
   async function createAdmin() {
@@ -77,7 +91,7 @@ describe('Phase 6 users', () => {
     };
   }
 
-  it("a 'user' role gets FORBIDDEN on every users endpoint", async () => {
+  it("a 'user' role gets FORBIDDEN on create and resend-invite", async () => {
     const { accessToken } = await createLearner();
     const headers = { Authorization: `Bearer ${accessToken}` };
 
@@ -93,15 +107,21 @@ describe('Phase 6 users', () => {
     const reset = await request(app)
       .post('/api/users/507f1f77bcf86cd799439011/reset-password')
       .set(headers);
+    const resend = await request(app)
+      .post('/api/users/507f1f77bcf86cd799439011/resend-invite')
+      .set(headers);
 
     expect(list.status).toBe(403);
     expect(list.body.error.code).toBe('FORBIDDEN');
     expect(create.body.error.code).toBe('FORBIDDEN');
     expect(patch.body.error.code).toBe('FORBIDDEN');
     expect(reset.body.error.code).toBe('FORBIDDEN');
+    expect(resend.status).toBe(403);
+    expect(resend.body.error.code).toBe('FORBIDDEN');
+    expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('creating a user returns a 16-character plaintext password exactly once', async () => {
+  it('creating a user sends exactly one email and returns no password or token', async () => {
     const { accessToken } = await createAdmin();
 
     const res = await request(app)
@@ -114,49 +134,83 @@ describe('Phase 6 users', () => {
       });
 
     expect(res.status).toBe(201);
-    expect(res.body.temporaryPassword).toMatch(/^[A-Za-z0-9]{16}$/);
+    expect(res.body.emailSent).toBe(true);
     expect(res.body.user.email).toBe('new@rva.test');
-    expect(res.body.user.mustChangePassword).toBe(true);
+    expect(res.body.user.status).toBe('pending');
+    expect(res.body).not.toHaveProperty('temporaryPassword');
+    expect(res.body).not.toHaveProperty('token');
     expect(JSON.stringify(res.body)).not.toContain('passwordHash');
+    expect(sendMock).toHaveBeenCalledTimes(1);
 
     const listed = await request(app)
       .get('/api/users')
       .set('Authorization', `Bearer ${accessToken}`);
-    expect(listed.body.data[0].temporaryPassword).toBeUndefined();
     expect(JSON.stringify(listed.body)).not.toContain('passwordHash');
-    expect(JSON.stringify(listed.body)).not.toContain(res.body.temporaryPassword);
   });
 
-  it('the created user can log in with that password and is forced to change it', async () => {
+  it('the stored token value does not equal the emailed token', async () => {
     const { accessToken } = await createAdmin();
     const created = await request(app)
       .post('/api/users')
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        name: 'Forced Change',
-        email: 'forced@rva.test',
-        role: 'super_admin',
-      });
+      .send({ name: 'Token Check', email: 'tokencheck@rva.test', role: 'user' });
 
-    const login = await request(app).post('/api/auth/login').send({
-      email: 'forced@rva.test',
-      password: created.body.temporaryPassword,
+    const rawToken = extractInviteToken();
+    const stored = await InviteToken.findOne({
+      userId: created.body.user.id,
+      purpose: 'invite',
     });
 
-    expect(login.status).toBe(200);
-    expect(login.body.user.mustChangePassword).toBe(true);
+    expect(stored).not.toBeNull();
+    expect(stored?.tokenHash).not.toBe(rawToken);
+    expect(stored?.tokenHash.includes(rawToken)).toBe(false);
+    expect(await argon2.verify(stored!.tokenHash, rawToken)).toBe(true);
+  });
 
-    const me = await request(app)
-      .get('/api/auth/me')
-      .set('Authorization', `Bearer ${login.body.accessToken}`);
-    expect(me.status).toBe(200);
-    expect(me.body.user.mustChangePassword).toBe(true);
+  it('a send failure still creates the user and returns emailSent false', async () => {
+    sendMock.mockResolvedValueOnce({ data: null, error: { message: 'Resend API down' } });
+    const { accessToken } = await createAdmin();
 
-    const blocked = await request(app)
-      .get('/api/auth/__test/admin')
-      .set('Authorization', `Bearer ${login.body.accessToken}`);
-    expect(blocked.status).toBe(403);
-    expect(blocked.body.error.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    const res = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Flaky Email', email: 'flaky@rva.test', role: 'user' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.emailSent).toBe(false);
+    expect(res.body.emailError).toBeTruthy();
+
+    const stored = await User.findOne({ email: 'flaky@rva.test' });
+    expect(stored).not.toBeNull();
+  });
+
+  it('resend-invite invalidates the previous token', async () => {
+    const { accessToken } = await createAdmin();
+    const created = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ name: 'Resend Me', email: 'resend@rva.test', role: 'user' });
+
+    const firstToken = extractInviteToken();
+
+    const resend = await request(app)
+      .post(`/api/users/${created.body.user.id}/resend-invite`)
+      .set('Authorization', `Bearer ${accessToken}`);
+
+    expect(resend.status).toBe(200);
+    expect(resend.body.emailSent).toBe(true);
+    expect(sendMock).toHaveBeenCalledTimes(2);
+
+    const secondToken = extractInviteToken();
+    expect(secondToken).not.toBe(firstToken);
+
+    const oldTokenCheck = await request(app).get(`/api/auth/invite/${firstToken}`);
+    expect(oldTokenCheck.status).toBe(400);
+    expect(oldTokenCheck.body.error.code).toBe('INVALID_INVITE_TOKEN');
+
+    const newTokenCheck = await request(app).get(`/api/auth/invite/${secondToken}`);
+    expect(newTokenCheck.status).toBe(200);
+    expect(newTokenCheck.body.email).toBe('resend@rva.test');
   });
 
   it('a duplicate email returns VALIDATION_ERROR, not a 500', async () => {
@@ -198,6 +252,12 @@ describe('Phase 6 users', () => {
         role: 'user',
       });
 
+    const rawToken = extractInviteToken();
+    const accept = await request(app)
+      .post(`/api/auth/invite/${rawToken}/accept`)
+      .send({ password: 'brand-new-password-1' });
+    expect(accept.status).toBe(200);
+
     await request(app)
       .patch(`/api/users/${created.body.user.id}`)
       .set('Authorization', `Bearer ${accessToken}`)
@@ -205,44 +265,53 @@ describe('Phase 6 users', () => {
 
     const login = await request(app).post('/api/auth/login').send({
       email: 'inactive@rva.test',
-      password: created.body.temporaryPassword,
+      password: 'brand-new-password-1',
     });
 
     expect(login.status).toBe(401);
     expect(login.body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it("reset-password kills the target's existing refresh tokens", async () => {
+  it('admin reset-password emails a link and never reveals a password', async () => {
     const { accessToken } = await createAdmin();
     const created = await request(app)
       .post('/api/users')
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({
-        name: 'Reset Me',
-        email: 'reset@rva.test',
-        role: 'user',
-      });
+      .send({ name: 'Reset Me', email: 'reset@rva.test', role: 'user' });
 
-    const targetLogin = await request(app).post('/api/auth/login').send({
-      email: 'reset@rva.test',
-      password: created.body.temporaryPassword,
-    });
-    expect(targetLogin.status).toBe(200);
-    const cookie = extractRefreshCookie(targetLogin.headers['set-cookie']);
+    const inviteToken = extractInviteToken();
+    await request(app)
+      .post(`/api/auth/invite/${inviteToken}/accept`)
+      .send({ password: 'first-password-123' });
+
+    sendMock.mockClear();
 
     const reset = await request(app)
       .post(`/api/users/${created.body.user.id}/reset-password`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(reset.status).toBe(200);
-    expect(reset.body.temporaryPassword).toMatch(/^[A-Za-z0-9]{16}$/);
+    expect(reset.body.emailSent).toBe(true);
+    expect(reset.body).not.toHaveProperty('temporaryPassword');
+    expect(sendMock).toHaveBeenCalledTimes(1);
 
-    const tokens = await RefreshToken.find({ userId: created.body.user.id });
-    expect(tokens.length).toBeGreaterThan(0);
-    expect(tokens.every((token) => token.revokedAt != null)).toBe(true);
+    const resetToken = extractInviteToken();
+    const resetAccept = await request(app)
+      .post(`/api/auth/invite/${resetToken}/accept`)
+      .send({ password: 'second-password-456' });
+    expect(resetAccept.status).toBe(200);
 
-    const refresh = await request(app).post('/api/auth/refresh').set('Cookie', cookie);
-    expect(refresh.status).toBe(401);
+    const oldLogin = await request(app).post('/api/auth/login').send({
+      email: 'reset@rva.test',
+      password: 'first-password-123',
+    });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await request(app).post('/api/auth/login').send({
+      email: 'reset@rva.test',
+      password: 'second-password-456',
+    });
+    expect(newLogin.status).toBe(200);
   });
 
   it('pagination meta is correct, and passwordHash never appears in any response', async () => {
@@ -268,9 +337,8 @@ describe('Phase 6 users', () => {
     expect(page1.body.data).toHaveLength(2);
     expect(page1.body.meta).toEqual({ page: 1, limit: 2, total: 4 });
     expect(JSON.stringify(page1.body)).not.toContain('passwordHash');
-
-    const sample = generatePassword(16);
-    expect(sample).toHaveLength(16);
-    expect(sample).toMatch(/^[A-Za-z0-9]+$/);
+    expect(
+      page1.body.data.every((u: { status: string }) => u.status === 'pending'),
+    ).toBe(true);
   });
 });

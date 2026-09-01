@@ -8,6 +8,7 @@ const base = {
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
   LOG_LEVEL: 'info',
+  APP_URL: 'http://localhost:5173',
 };
 
 describe('env schema', () => {
@@ -50,7 +51,29 @@ describe('env schema', () => {
       CLOUDINARY_API_SECRET: 'secret',
       UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
       UPSTASH_REDIS_REST_TOKEN: 'token',
+      RESEND_API_KEY: 're_live_example',
+      EMAIL_FROM: 'RVA Academy <no-reply@rva.academy>',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('requires RESEND_API_KEY and EMAIL_FROM in production', () => {
+    const result = parseEnv({
+      ...base,
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://app.example.com',
+      STORAGE_DRIVER: 'cloudinary',
+      CLOUDINARY_CLOUD_NAME: 'demo',
+      CLOUDINARY_API_KEY: 'key',
+      CLOUDINARY_API_SECRET: 'secret',
+      UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
+      UPSTASH_REDIS_REST_TOKEN: 'token',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('requires APP_URL to be a valid URL', () => {
+    const result = parseEnv({ ...base, APP_URL: 'not-a-url' });
+    expect(result.success).toBe(false);
   });
 });

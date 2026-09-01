@@ -44,3 +44,9 @@ export {
   type IRefreshToken,
   type RefreshTokenDocument,
 } from './RefreshToken.js';
+export {
+  InviteToken,
+  type IInviteToken,
+  type InviteTokenDocument,
+  type InvitePurpose,
+} from './InviteToken.js';

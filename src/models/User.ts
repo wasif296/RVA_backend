@@ -10,7 +10,8 @@ import type { Role } from '../shared/index.js';
 export interface IUser {
   name: string;
   email: string;
-  passwordHash: string;
+  /** Absent until the user accepts their invite (or a password reset) and sets one. */
+  passwordHash?: string;
   role: Role;
   isActive: boolean;
   mustChangePassword: boolean;
@@ -33,7 +34,7 @@ const userSchema = new Schema<IUser>(
       trim: true,
       index: true,
     },
-    passwordHash: { type: String, required: true, select: false },
+    passwordHash: { type: String, select: false },
     role: {
       type: String,
       enum: ['super_admin', 'user'] satisfies Role[],

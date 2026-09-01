@@ -11,6 +11,7 @@ export const ERROR_CODES = [
   'HEARTBEAT_REJECTED',
   'QUIZ_ALREADY_PASSED',
   'LESSON_LOCKED',
+  'INVALID_INVITE_TOKEN',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -36,4 +37,5 @@ export const HTTP_STATUS_BY_CODE: Record<ErrorCode, number> = {
   HEARTBEAT_REJECTED: 400,
   QUIZ_ALREADY_PASSED: 409,
   LESSON_LOCKED: 403,
+  INVALID_INVITE_TOKEN: 400,
 };

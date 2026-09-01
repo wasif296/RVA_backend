@@ -1,7 +1,12 @@
 import type { NextFunction, Request, Response } from 'express';
 import { REFRESH_COOKIE_NAME } from '../../utils/tokens.js';
 import { AppError } from '../../utils/AppError.js';
-import type { ChangePasswordBody, LoginBody } from './auth.schema.js';
+import type {
+  AcceptInviteBody,
+  ChangePasswordBody,
+  InviteTokenParams,
+  LoginBody,
+} from './auth.schema.js';
 import * as authService from './auth.service.js';
 
 export async function login(
@@ -95,6 +100,40 @@ export async function changePassword(
       res,
     });
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getInvite(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { token } = req.params as unknown as InviteTokenParams;
+    const result = await authService.getInviteInfo(token);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function acceptInvite(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { token } = req.params as unknown as InviteTokenParams;
+    const body = req.body as AcceptInviteBody;
+    const result = await authService.acceptInvite({
+      token,
+      password: body.password,
+      userAgent: req.get('user-agent') ?? undefined,
+      res,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

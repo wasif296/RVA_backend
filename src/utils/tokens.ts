@@ -67,6 +67,22 @@ export async function verifyRefreshSecret(
   }
 }
 
+export function generateInviteToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+export async function hashInviteToken(token: string): Promise<string> {
+  return argon2.hash(token, { type: argon2.argon2id });
+}
+
+export async function verifyInviteToken(hash: string, token: string): Promise<boolean> {
+  try {
+    return await argon2.verify(hash, token);
+  } catch {
+    return false;
+  }
+}
+
 export function buildRefreshCookieValue(tokenId: string, secret: string): string {
   return `${tokenId}.${secret}`;
 }

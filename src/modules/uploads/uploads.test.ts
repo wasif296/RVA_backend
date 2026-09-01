@@ -247,6 +247,7 @@ const baseEnv = {
   LOG_LEVEL: 'silent',
   UPLOAD_DIR: './uploads-test',
   PUBLIC_UPLOAD_BASE_URL: '/uploads',
+  APP_URL: 'http://localhost:5173',
 } satisfies NodeJS.ProcessEnv;
 
 describe('STORAGE_DRIVER env + adapter wiring', () => {

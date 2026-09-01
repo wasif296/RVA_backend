@@ -150,6 +150,24 @@ export const uploadRateLimiter = createLimiter({
   },
 });
 
+/** 5 resend-invite requests per hour per target user. */
+export const resendInviteRateLimiter = createLimiter({
+  name: 'resend-invite',
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  failClosed: false,
+  keyGenerator: (req: Request) => `resend-invite:${req.params.id ?? 'unknown'}`,
+});
+
+/** Public token-guessing surface — argon2 verify is deliberately slow. */
+export const inviteRateLimiter = createLimiter({
+  name: 'invite',
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  failClosed: false,
+  keyGenerator: (req: Request) => ipKeyGenerator(req.ip ?? 'unknown'),
+});
+
 /** 10 quiz submissions per hour per quiz (lesson or final exam) per user. */
 export const quizSubmitRateLimiter = createLimiter({
   name: 'quiz-submit',

@@ -10,3 +10,5 @@ node_modules/
 # Root local-disk upload dirs only. A bare "uploads/" also ignores src/modules/uploads/.
 /uploads/
 /uploads-test/
+/email-preview-invite.html
+/email-preview-reset.html

@@ -8,6 +8,7 @@ import {
   Badge,
   Course,
   ExamSubmission,
+  InviteToken,
   Lesson,
   Notification,
   Progress,
@@ -81,6 +82,7 @@ export async function seedDatabase(): Promise<SeedResult> {
     Badge.deleteMany({}),
     Notification.deleteMany({}),
     RefreshToken.deleteMany({}),
+    InviteToken.deleteMany({}),
   ]);
 
   // Drop leftover unique indexes (e.g. lessonId_1) before inserting exams.

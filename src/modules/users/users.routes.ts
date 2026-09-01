@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
+import { resendInviteRateLimiter } from '../../middleware/rateLimit.js';
 import { requirePasswordCurrent } from '../../middleware/requirePasswordCurrent.js';
 import { requireRole } from '../../middleware/requireRole.js';
 import { validate } from '../../middleware/validate.js';
@@ -30,4 +31,11 @@ usersRouter.post(
   '/:id/reset-password',
   validate(userIdParamsSchema, 'params'),
   usersController.resetPassword,
+);
+
+usersRouter.post(
+  '/:id/resend-invite',
+  resendInviteRateLimiter,
+  validate(userIdParamsSchema, 'params'),
+  usersController.resendInvite,
 );
