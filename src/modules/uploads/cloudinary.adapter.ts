@@ -30,10 +30,14 @@ export class CloudinaryAdapter implements StorageAdapter {
       api_key: credentials.apiKey,
       api_secret: credentials.apiSecret,
       secure: true,
+      // Do not append `?_a=` analytics onto stored delivery URLs.
+      urlAnalytics: false,
     });
   }
 
-  async save(params: { data: Buffer; extension: string }): Promise<{ key: string }> {
+  async save(
+    params: { data: Buffer; extension: string },
+  ): Promise<{ key: string; url?: string }> {
     void params.extension;
     const publicId = randomUUID();
 
@@ -56,7 +60,7 @@ export class CloudinaryAdapter implements StorageAdapter {
       stream.end(params.data);
     });
 
-    return { key: uploaded.public_id };
+    return { key: uploaded.public_id, url: uploaded.secure_url };
   }
 
   async delete(key: string): Promise<void> {
@@ -69,6 +73,8 @@ export class CloudinaryAdapter implements StorageAdapter {
       resource_type: 'image',
       type: 'upload',
       sign_url: false,
+      force_version: false,
+      urlAnalytics: false,
     });
     if (url.startsWith('https://')) return url;
     if (url.startsWith('//')) return `https:${url}`;

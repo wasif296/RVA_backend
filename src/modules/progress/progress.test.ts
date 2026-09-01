@@ -127,7 +127,10 @@ describe('Phase 10 progress summary', () => {
       expect(course.progressPct).toBe(0);
       expect(course.totalPointsEarned).toBe(0);
       expect(course.finalExamUnlocked).toBe(false);
+      expect(course.thumbnailUrl).toBe('https://example.com/thumb.jpg');
+      expect(course).not.toHaveProperty('thumbnailPublicId');
     }
+    expect(JSON.stringify(res.body)).not.toMatch(/thumbnailPublicId/);
   });
 
   it('draft and archived courses never appear', async () => {
@@ -451,6 +454,43 @@ describe('Phase 10 progress summary', () => {
       expect(row.lastActivityAt).toBeTruthy();
       expect(row.thumbnailUrl).toBe('https://example.com/thumb.jpg');
     }
+  });
+
+  it('a course with a thumbnail returns thumbnailUrl on summary, catalog, and detail', async () => {
+    const admin = await loginAs('super_admin', 'admin-thumb-payloads@rva.test');
+    const { course } = await seedPublishedCourse({
+      adminId: admin.userId,
+      title: 'Thumb Payloads',
+      slug: 'thumb-payloads',
+    });
+    await Course.findByIdAndUpdate(course._id, {
+      thumbnailPublicId: 'rva/thumbnails/internal-only',
+    });
+
+    const learner = await loginAs('user', 'thumb-payloads-learner@rva.test');
+    const headers = { Authorization: `Bearer ${learner.token}` };
+    const thumb = 'https://example.com/thumb.jpg';
+    const courseId = course._id.toString();
+
+    const summary = await request(app).get('/api/progress/summary').set(headers);
+    expect(summary.status).toBe(200);
+    expect(summary.body.courses).toHaveLength(1);
+    expect(summary.body.courses[0].thumbnailUrl).toBe(thumb);
+    expect(summary.body.courses[0]).not.toHaveProperty('thumbnailPublicId');
+    expect(JSON.stringify(summary.body)).not.toMatch(/thumbnailPublicId/);
+
+    const catalog = await request(app).get('/api/courses').set(headers);
+    expect(catalog.status).toBe(200);
+    const catalogRow = catalog.body.data.find((row: { id: string }) => row.id === courseId);
+    expect(catalogRow.thumbnailUrl).toBe(thumb);
+    expect(catalogRow).not.toHaveProperty('thumbnailPublicId');
+    expect(JSON.stringify(catalog.body)).not.toMatch(/thumbnailPublicId/);
+
+    const detail = await request(app).get(`/api/courses/${courseId}`).set(headers);
+    expect(detail.status).toBe(200);
+    expect(detail.body.course.thumbnailUrl).toBe(thumb);
+    expect(detail.body.course).not.toHaveProperty('thumbnailPublicId');
+    expect(JSON.stringify(detail.body)).not.toMatch(/thumbnailPublicId/);
   });
 
   it('a learner with four started courses gets exactly three inProgress', async () => {

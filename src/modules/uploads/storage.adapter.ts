@@ -12,7 +12,7 @@ import { CloudinaryAdapter } from './cloudinary.adapter.js';
  * Routes, services, and tests must depend on this interface only.
  */
 export interface StorageAdapter {
-  save(params: { data: Buffer; extension: string }): Promise<{ key: string }>;
+  save(params: { data: Buffer; extension: string }): Promise<{ key: string; url?: string }>;
   delete(key: string): Promise<void>;
   getPublicUrl(key: string): string;
 }

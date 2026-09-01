@@ -108,10 +108,13 @@ export async function uploadThumbnail(
       .toBuffer();
 
     const storage = getStorageAdapter();
-    const { key } = await storage.save({ data: processed, extension: 'webp' });
-    const url = storage.getPublicUrl(key);
+    const saved = await storage.save({ data: processed, extension: 'webp' });
+    const url =
+      saved.url && saved.url.startsWith('https://')
+        ? saved.url
+        : storage.getPublicUrl(saved.key);
 
-    res.status(201).json({ url, publicId: key });
+    res.status(201).json({ url, publicId: saved.key });
   } catch (error) {
     if (error instanceof AppError) {
       next(error);

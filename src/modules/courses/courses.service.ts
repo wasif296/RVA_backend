@@ -178,7 +178,9 @@ export async function getCourseById(params: {
     throw AppError.notFound('Course not found');
   }
 
-  return toCourseDto(course);
+  return toCourseDto(course, {
+    includePublicId: params.role === 'super_admin',
+  });
 }
 
 export type CourseDetailLessonDto = {
