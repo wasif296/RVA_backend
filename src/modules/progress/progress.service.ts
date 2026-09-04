@@ -422,10 +422,15 @@ export async function getProgressSummary(userId: string): Promise<ProgressSummar
 export type LearnerProgressLessonDto = {
   lessonId: string;
   title: string;
+  /** True once the learner has at least one heartbeat on this lesson. */
+  started: boolean;
+  watchedSec: number;
+  requiredWatchSec: number;
   videoCompletedAt: string | null;
   videoPointsAwarded: number;
   bestQuizScore: number | null;
   quizMaxScore: number | null;
+  quizPassingScorePct: number | null;
   quizPointsAwarded: number;
   quizAttempts: number;
 };
@@ -438,6 +443,9 @@ export type LearnerProgressFinalExamDto = {
   submissionStatus: null | 'submitted' | 'graded';
   marksAwarded: number | null;
   passed: boolean | null;
+  feedback: string | null;
+  docUrl: string | null;
+  loomUrl: string | null;
 };
 
 export type LearnerProgressCourseDto = {
@@ -492,10 +500,14 @@ export type AdminProgressListQuery = {
 type DetailAggLesson = {
   lessonId: Types.ObjectId;
   title: string;
+  started: boolean;
+  watchedSec: number;
+  requiredWatchSec: number;
   videoCompletedAt: Date | null;
   videoPointsAwarded: boolean;
   bestQuizScore: number | null;
   quizMaxScore: number | null;
+  quizPassingScorePct: number | null;
   quizPointsAwarded: number;
   quizAttempts: number;
 };
@@ -524,6 +536,9 @@ type DetailAggCourse = {
     submissionStatus: null | 'submitted' | 'graded';
     marksAwarded: number | null;
     passed: boolean | null;
+    feedback: string | null;
+    docUrl: string | null;
+    loomUrl: string | null;
   } | null;
 };
 
@@ -623,6 +638,9 @@ export async function getLearnerProgressDetail(
                     status: 1,
                     marksAwarded: 1,
                     passed: 1,
+                    feedback: 1,
+                    docUrl: 1,
+                    loomUrl: 1,
                   },
                 },
                 { $limit: 1 },
@@ -658,6 +676,7 @@ export async function getLearnerProgressDetail(
                       {
                         $project: {
                           pointsPerQuestion: 1,
+                          passingScorePct: 1,
                           questionCount: {
                             $size: { $ifNull: ['$questions', []] },
                           },
@@ -690,6 +709,12 @@ export async function getLearnerProgressDetail(
                     _id: 0,
                     lessonId: '$_id',
                     title: 1,
+                    requiredWatchSec: 1,
+                    started: {
+                      $cond: [{ $ifNull: ['$progressLesson.lessonId', false] }, true, false],
+                    },
+                    watchedSec: { $ifNull: ['$progressLesson.watchedSec', 0] },
+                    // Missing videoCompletedAt must stay null — never treat absence as complete.
                     videoCompletedAt: {
                       $ifNull: ['$progressLesson.videoCompletedAt', null],
                     },
@@ -719,6 +744,13 @@ export async function getLearnerProgressDetail(
                         null,
                       ],
                     },
+                    quizPassingScorePct: {
+                      $cond: [
+                        { $ifNull: ['$quizDoc._id', false] },
+                        { $ifNull: ['$quizDoc.passingScorePct', null] },
+                        null,
+                      ],
+                    },
                   },
                 },
               ],
@@ -733,7 +765,8 @@ export async function getLearnerProgressDetail(
                   $filter: {
                     input: '$lessons',
                     as: 'l',
-                    cond: { $ne: ['$$l.videoCompletedAt', null] },
+                    // Prefer $gt over $ne: missing fields make $ne(null) true in MongoDB.
+                    cond: { $gt: ['$$l.videoCompletedAt', null] },
                   },
                 },
               },
@@ -863,6 +896,15 @@ export async function getLearnerProgressDetail(
                         null,
                       ],
                     },
+                    feedback: {
+                      $cond: [
+                        { $eq: ['$finalSubmission.status', 'graded'] },
+                        { $ifNull: ['$finalSubmission.feedback', null] },
+                        null,
+                      ],
+                    },
+                    docUrl: { $ifNull: ['$finalSubmission.docUrl', null] },
+                    loomUrl: { $ifNull: ['$finalSubmission.loomUrl', null] },
                   },
                   null,
                 ],
@@ -917,12 +959,16 @@ export async function getLearnerProgressDetail(
     lessons: course.lessons.map((lesson) => ({
       lessonId: lesson.lessonId.toString(),
       title: lesson.title,
+      started: Boolean(lesson.started),
+      watchedSec: lesson.watchedSec ?? 0,
+      requiredWatchSec: lesson.requiredWatchSec ?? 0,
       videoCompletedAt: lesson.videoCompletedAt
         ? new Date(lesson.videoCompletedAt).toISOString()
         : null,
       videoPointsAwarded: lesson.videoPointsAwarded ? videoPoints : 0,
       bestQuizScore: lesson.bestQuizScore,
       quizMaxScore: lesson.quizMaxScore,
+      quizPassingScorePct: lesson.quizPassingScorePct,
       quizPointsAwarded: lesson.quizPointsAwarded ?? 0,
       quizAttempts: lesson.quizAttempts ?? 0,
     })),
@@ -935,6 +981,9 @@ export async function getLearnerProgressDetail(
           submissionStatus: course.finalExam.submissionStatus,
           marksAwarded: course.finalExam.marksAwarded,
           passed: course.finalExam.passed,
+          feedback: course.finalExam.feedback ?? null,
+          docUrl: course.finalExam.docUrl ?? null,
+          loomUrl: course.finalExam.loomUrl ?? null,
         }
       : null,
   }));
@@ -1091,7 +1140,8 @@ export async function listAdminProgress(
                   $filter: {
                     input: { $ifNull: ['$$p.lessons', []] },
                     as: 'l',
-                    cond: { $ne: ['$$l.videoCompletedAt', null] },
+                    // $ne(missing, null) is true in MongoDB — only $gt counts real dates.
+                    cond: { $gt: ['$$l.videoCompletedAt', null] },
                   },
                 },
               },
@@ -1129,7 +1179,7 @@ export async function listAdminProgress(
                               $filter: {
                                 input: { $ifNull: ['$$prog.lessons', []] },
                                 as: 'l',
-                                cond: { $ne: ['$$l.videoCompletedAt', null] },
+                                cond: { $gt: ['$$l.videoCompletedAt', null] },
                               },
                             },
                           },

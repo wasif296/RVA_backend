@@ -7,9 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    "start": "node dist/server.js",
+    "dev": "node init && tsx watch src/server.ts",
+    "build": "node init && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "start": "node init && node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "seed": "tsx src/scripts/seed.ts",
@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.12.1",
     "multer": "^2.2.0",
+    "node-fetch": "^3.3.2",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "resend": "^6.25.0",

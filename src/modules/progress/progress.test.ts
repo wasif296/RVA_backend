@@ -1091,4 +1091,202 @@ describe('Phase 15 progress detail + admin', () => {
     aggregateSpy.mockRestore();
     findSpy.mockRestore();
   });
+
+  it('a heartbeat without videoCompletedAt counts as 0 completed across admin, summary, and detail', async () => {
+    const admin = await loginAs('super_admin', 'admin-hb-only@rva.test');
+    const { course, lessons } = await seedPublishedCourse({
+      adminId: admin.userId,
+      title: 'Heartbeat Only',
+      slug: 'heartbeat-only',
+      lessonCount: 1,
+    });
+    const learner = await loginAs('user', 'hb-only@rva.test');
+
+    await Progress.create({
+      userId: learner.userId,
+      courseId: course._id,
+      startedAt: new Date(),
+      lessons: [
+        {
+          lessonId: lessons[0]!._id,
+          watchedSec: 22,
+          // videoCompletedAt intentionally omitted — first heartbeat only
+          videoPointsAwarded: false,
+          bestQuizScore: 0,
+          quizPointsAwarded: 0,
+          attempts: 0,
+        },
+      ],
+    });
+
+    const adminList = await request(app)
+      .get('/api/admin/progress?search=hb-only')
+      .set('Authorization', `Bearer ${admin.token}`);
+    expect(adminList.status).toBe(200);
+    const adminRow = adminList.body.data.find(
+      (row: { email: string }) => row.email === 'hb-only@rva.test',
+    );
+    expect(adminRow).toMatchObject({
+      coursesCompleted: 0,
+      lessonsCompleted: 0,
+      totalPoints: 0,
+      coursesStarted: 1,
+    });
+
+    const summary = await request(app)
+      .get('/api/progress/summary')
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(summary.status).toBe(200);
+    expect(summary.body.coursesCompleted).toBe(0);
+    expect(summary.body.lessonsCompleted).toBe(0);
+    expect(summary.body.courses[0].completedLessonCount).toBe(0);
+    expect(summary.body.courses[0].progressPct).toBe(0);
+
+    const detail = await request(app)
+      .get('/api/progress')
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body.totals.lessonsCompleted).toBe(0);
+    expect(detail.body.totals.coursesCompleted).toBe(0);
+    expect(detail.body.courses[0].completedLessonCount).toBe(0);
+    expect(detail.body.courses[0].lessons[0]).toMatchObject({
+      started: true,
+      watchedSec: 22,
+      videoCompletedAt: null,
+      videoPointsAwarded: 0,
+    });
+
+    const courseDetail = await request(app)
+      .get(`/api/courses/${course._id.toString()}`)
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(courseDetail.status).toBe(200);
+    expect(courseDetail.body.summary.completedLessonCount).toBe(0);
+    expect(courseDetail.body.summary.progressPct).toBe(0);
+
+    // The three learner-facing completion numbers never disagree.
+    expect(summary.body.lessonsCompleted).toBe(detail.body.totals.lessonsCompleted);
+    expect(summary.body.courses[0].completedLessonCount).toBe(
+      courseDetail.body.summary.completedLessonCount,
+    );
+    expect(adminRow.lessonsCompleted).toBe(summary.body.lessonsCompleted);
+  });
+
+  it('a completed video shows 1 lesson completed and 5 points across all payloads', async () => {
+    const admin = await loginAs('super_admin', 'admin-vid-done@rva.test');
+    const { course, lessons } = await seedPublishedCourse({
+      adminId: admin.userId,
+      title: 'Video Done',
+      slug: 'video-done',
+      lessonCount: 1,
+    });
+    const learner = await loginAs('user', 'vid-done@rva.test');
+
+    await Progress.create({
+      userId: learner.userId,
+      courseId: course._id,
+      startedAt: new Date(),
+      completedAt: new Date(),
+      lessons: [
+        {
+          lessonId: lessons[0]!._id,
+          watchedSec: 60,
+          videoCompletedAt: new Date(),
+          videoPointsAwarded: true,
+          bestQuizScore: 0,
+          quizPointsAwarded: 0,
+          attempts: 0,
+        },
+      ],
+    });
+    await User.findByIdAndUpdate(learner.userId, { totalPoints: 5 });
+
+    const adminList = await request(app)
+      .get('/api/admin/progress?search=vid-done')
+      .set('Authorization', `Bearer ${admin.token}`);
+    const adminRow = adminList.body.data.find(
+      (row: { email: string }) => row.email === 'vid-done@rva.test',
+    );
+    expect(adminRow).toMatchObject({
+      coursesCompleted: 1,
+      lessonsCompleted: 1,
+      totalPoints: 5,
+    });
+
+    const summary = await request(app)
+      .get('/api/progress/summary')
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(summary.body.coursesCompleted).toBe(1);
+    expect(summary.body.lessonsCompleted).toBe(1);
+    expect(summary.body.courses[0].completedLessonCount).toBe(1);
+    expect(summary.body.courses[0].totalPointsEarned).toBe(5);
+
+    const detail = await request(app)
+      .get('/api/progress')
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(detail.body.totals.lessonsCompleted).toBe(1);
+    expect(detail.body.totals.coursesCompleted).toBe(1);
+    expect(detail.body.totals.videoPoints).toBe(5);
+    expect(detail.body.courses[0].lessons[0].videoCompletedAt).toBeTruthy();
+    expect(detail.body.courses[0].lessons[0].videoPointsAwarded).toBe(5);
+
+    const courseDetail = await request(app)
+      .get(`/api/courses/${course._id.toString()}`)
+      .set('Authorization', `Bearer ${learner.token}`);
+    expect(courseDetail.body.summary.completedLessonCount).toBe(1);
+    expect(courseDetail.body.summary.totalPointsEarned).toBe(5);
+
+    expect(adminRow.lessonsCompleted).toBe(summary.body.lessonsCompleted);
+    expect(summary.body.lessonsCompleted).toBe(detail.body.totals.lessonsCompleted);
+    expect(detail.body.courses[0].completedLessonCount).toBe(
+      courseDetail.body.summary.completedLessonCount,
+    );
+  });
+
+  it('detail distinguishes not-started lessons from started-but-incomplete', async () => {
+    const admin = await loginAs('super_admin', 'admin-ns@rva.test');
+    const { course, lessons } = await seedPublishedCourse({
+      adminId: admin.userId,
+      title: 'Not Started Dist',
+      slug: 'not-started-dist',
+      lessonCount: 2,
+    });
+    const learner = await loginAs('user', 'ns-dist@rva.test');
+
+    await Progress.create({
+      userId: learner.userId,
+      courseId: course._id,
+      startedAt: new Date(),
+      lessons: [
+        {
+          lessonId: lessons[0]!._id,
+          watchedSec: 10,
+          videoPointsAwarded: false,
+          bestQuizScore: 0,
+          quizPointsAwarded: 0,
+          attempts: 0,
+        },
+      ],
+    });
+
+    const detail = await request(app)
+      .get('/api/progress')
+      .set('Authorization', `Bearer ${learner.token}`);
+
+    expect(detail.status).toBe(200);
+    const [started, untouched] = detail.body.courses[0].lessons;
+    expect(started).toMatchObject({
+      started: true,
+      watchedSec: 10,
+      videoCompletedAt: null,
+      videoPointsAwarded: 0,
+    });
+    expect(untouched).toMatchObject({
+      started: false,
+      watchedSec: 0,
+      videoCompletedAt: null,
+      videoPointsAwarded: 0,
+    });
+    expect(detail.body.courses[0].completedLessonCount).toBe(0);
+    expect(started.requiredWatchSec).toBeGreaterThan(0);
+  });
 });

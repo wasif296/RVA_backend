@@ -2,8 +2,6 @@ node_modules/
 /dist/
 /build/
 /coverage/
-.env
-.env.local
 *.log
 .DS_Store
 *.tsbuildinfo
@@ -12,3 +10,4 @@ node_modules/
 /uploads-test/
 /email-preview-invite.html
 /email-preview-reset.html
+config.bat
